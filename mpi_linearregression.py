@@ -9,14 +9,21 @@ pydownscale_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(pydownscale_path)
 from pydownscale.data import DownscaleData, read_nc_files
 from pydownscale.downscale import DownscaleModel
+import argparse
+
+parser = argparse.ArgumentParser(description='Datafiles.')
+parser.add_argument('--cmip5_dir', dest='cmip5_dir')
+parser.add_argument('--cpc_dir', dest='cpc_dir')
+args = parser.parse_args()
+
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
 # initialize downscale data
-cmip5_dir = "/Users/tj/data/cmip5/access1-0/"
-cpc_dir = "/Users/tj/data/usa_cpc_nc/merged"
+cmip5_dir = args.cmip5_dir   #/Users/tj/data/cmip5/access1-0/"
+cpc_dir = args.cpc_dir      # /Users/tj/data/usa_cpc_nc/merged"
 
 # climate model data, monthly
 cmip5 = read_nc_files(cmip5_dir)
@@ -33,6 +40,7 @@ data = DownscaleData(cmip5, monthlycpc)
 if rank == 0:
    ## lets split up our y's
    pairs = data.location_pairs('lat', 'lon')[:size]
+   print "Number of pairs:", len(data.location_pairs('lat', 'lon'))
 else:
    pairs = None
 
