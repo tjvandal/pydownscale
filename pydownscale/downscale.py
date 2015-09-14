@@ -1,5 +1,6 @@
 from data import DownscaleData, read_nc_files
 import numpy
+from scipy.stats import pearsonr, spearmanr, kendalltau
 
 class DownscaleModel:
     def __init__(self, data, model, training_size=0.70):
@@ -20,6 +21,7 @@ class DownscaleModel:
 
     # include quantile mapping ability
     def train(self, location):
+        self.location = location
         y = self.data.observations.loc[location].to_array().values.squeeze()
         self.y_train = y[:self.numtrain]
         self.y_test = y[self.numtrain:]
@@ -34,6 +36,24 @@ class DownscaleModel:
             return numpy.mean((self.y_train - self.yhat_train) ** 2)
 
     # add functionality: plotting, quantile mapping, distirbutions, correlations
+    def get_results(self, test_set=True):
+        if test_set:
+            y = self.y_test
+            yhat = self.yhat_test
+        else:
+            y = self.y_train
+            yhat = self.yhat_train
+        results = self.location   ## dictionary of lat, lon
+        results['rmse'] = self.get_mse(test_set)**(0.5)
+        results['pearson'] = pearsonr(y, yhat)[0]
+        results['spearman'] = spearmanr(y, yhat)[0]
+        results['kendaltau'] = kendalltau(y, yhat)[0]
+        results['yhat_mean'] = numpy.mean(yhat)
+        results['y_mean'] = numpy.mean(y)
+        results['yhat_std'] = numpy.std(yhat)
+        results['y_std'] = numpy.std(y)
+        return results
+
 
 if __name__ == "__main__":
     import pandas
@@ -55,4 +75,4 @@ if __name__ == "__main__":
     linearmodel = LassoCV(alphas=numpy.array([0.1, 1, 10]))
     dmodel = DownscaleModel(data, linearmodel)
     dmodel.train(location={'lat': 31.875, 'lon': -81.375})
-    print dmodel.get_mse(test_set=False), dmodel.get_mse()
+    print dmodel.get_results()

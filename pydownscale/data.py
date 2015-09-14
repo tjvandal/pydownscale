@@ -51,6 +51,28 @@ class DownscaleData:
         X = X.reshape((X.shape[0], ndim))
         return X
 
+    def location_pairs(self, dim1, dim2):
+        Y = self.observations.to_array()
+        if (dim1 not in Y.dims) or (dim2 not in Y.dims):
+            raise IndexError("dim1=%s and dim2=%s are not in observations." % (dim1, dim2))
+        if len(Y.dims) != 4:
+            raise ValueError("There should be 4 dimensions with only 1 variable.")
+
+        t0 = Y['time'].values[0]
+        t0array = self.observations.loc[dict(time=t0)].to_array()
+
+        # check which dimension axes
+        dims = t0array.dims
+        dim1_axis = [j for j in range(len(dims)) if dims[j] == dim1][0]
+        dim2_axis = [j for j in range(len(dims)) if dims[j] == dim2][0]
+        t0values = t0array.values
+        if dim1_axis > dim2_axis:
+            t0values = numpy.swapaxes(t0values, dim1_axis, dim2_axis)
+        t0values = t0values.squeeze()
+
+        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] != -999.]
+        return numpy.array(pairs)
+
 def read_nc_files(dir):
     files = [os.path.join(dir, f) for f in os.listdir(dir) if ".nc" == f[-3:]]
     if len(files) > 1:
@@ -80,4 +102,5 @@ if __name__ == "__main__":
 
     d = DownscaleData(cmip5, monthlycpc)
     print "getting covariates"
-    X = d.get_X()
+    print d.location_pairs('lat', 'lon')
+    print d.location_pairs('lon', 'lat')
