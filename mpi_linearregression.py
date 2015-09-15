@@ -1,5 +1,7 @@
+#!/shared/apps/sage/sage-5.12/spkg/bin/sage -python
 from mpi4py import MPI
 import os
+import time
 import sys
 import pandas
 import numpy
@@ -14,7 +16,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Datafiles.')
 parser.add_argument('--cmip5_dir', dest='cmip5_dir')
 parser.add_argument('--cpc_dir', dest='cpc_dir')
-args = parser.parse_args()
+args = parser.parse_known_args()
 
 
 comm = MPI.COMM_WORLD
@@ -22,8 +24,8 @@ size = comm.Get_size()
 rank = comm.Get_rank()
 
 # initialize downscale data
-cmip5_dir = args.cmip5_dir   #/Users/tj/data/cmip5/access1-0/"
-cpc_dir = args.cpc_dir      # /Users/tj/data/usa_cpc_nc/merged"
+cmip5_dir = args.cmip5_dir   #/Users/tj/data/cmip5/access1-0/
+cpc_dir = args.cpc_dir      # /Users/tj/data/usa_cpc_nc/merged/
 
 # climate model data, monthly
 cmip5 = read_nc_files(cmip5_dir)
@@ -45,10 +47,13 @@ else:
    pairs = None
 
 pairs = comm.scatter(pairs, root=0)
+t0 = time.time()
 linearmodel = LinearRegression()
 dmodel = DownscaleModel(data, linearmodel)
 dmodel.train(location={'lat': pairs[0], 'lon': pairs[1]})
-newData = comm.gather(dmodel.get_results(), root=0)
+res = dmodel.get_results()
+res['time_to_execute'] = time.time() - t0
+newData = comm.gather(res, root=0)
 
 if rank == 0:
-   print 'master:', newData
+	sys.stdout.write(newData)
