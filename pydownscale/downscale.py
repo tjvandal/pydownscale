@@ -63,12 +63,10 @@ if __name__ == "__main__":
 
     # climate model data, monthly
     cmip5 = read_nc_files(cmip5_dir)
-    cmip5.time = pandas.to_datetime(cmip5.  time.values)
     cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
 
     # daily data to monthly
     cpc = read_nc_files(cpc_dir)
-    cpc.time = pandas.to_datetime(cpc.time.values)
     monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
     data = DownscaleData(cmip5, monthlycpc)

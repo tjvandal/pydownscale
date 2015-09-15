@@ -1,6 +1,6 @@
-#!/shared/apps/sage/sage-5.12/spkg/bin/sage -python
+'#!/shared/apps/sage/sage-5.12/spkg/bin/sage -python'
 import sys
-sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
+#sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
 
 from mpi4py import MPI
 from scipy.stats import pearsonr, spearmanr, kendalltau
@@ -28,12 +28,12 @@ cpc_dir = args.cpc_dir      # /Users/tj/data/usa_cpc_nc/merged/
 
 # climate model data, monthly
 cmip5 = read_nc_files(cmip5_dir)
-cmip5.time = pandas.to_datetime(cmip5.time.values)
+#cmip5.time = pandas.to_datetime(cmip5.time.values)
 cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
 
 # daily data to monthly
 cpc = read_nc_files(cpc_dir)
-cpc.time = pandas.to_datetime(cpc.time.values)
+#cpc.time = pandas.to_datetime(cpc.time.values)
 monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
 data = DownscaleData(cmip5, monthlycpc)
@@ -54,9 +54,7 @@ res['time_to_execute'] = time.time() - t0
 newData = comm.gather(res, root=0)
 
 if rank == 0:
-   import json
-   sys.stdout.write("New data type" + type(newData).__name__ + "\nresults type:" + type(newData[0]).__name__)
-   with open('results.txt', 'w') as outfile:
-       json.dump(newData, outfile)
+   data = pandas.DataFrame(newData)
+   data.to_csv("results.csv", index=False)
 
-   sys.stdout.write("\n".join([str(d) for d in newData]))
+"mpirun -np 2 python mpi_linearregression.py --cmip5_dir /Users/tj/data/cmip5/access1-0/ --cpc_dir /Users/tj/data/usa_cpc_nc/merged/"
