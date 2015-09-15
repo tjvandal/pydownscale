@@ -1,23 +1,22 @@
 #!/shared/apps/sage/sage-5.12/spkg/bin/sage -python
+import sys
+sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
+
 from mpi4py import MPI
+from scipy.stats import pearsonr, spearmanr, kendalltau
 import os
 import time
-import sys
-import pandas
 import numpy
 from sklearn.linear_model import LinearRegression
-
-pydownscale_path = os.path.dirname(os.path.dirname(__file__))
-sys.path.append(pydownscale_path)
 from pydownscale.data import DownscaleData, read_nc_files
 from pydownscale.downscale import DownscaleModel
 import argparse
+import pandas
 
 parser = argparse.ArgumentParser(description='Datafiles.')
 parser.add_argument('--cmip5_dir', dest='cmip5_dir')
 parser.add_argument('--cpc_dir', dest='cpc_dir')
-args = parser.parse_known_args()
-
+args = parser.parse_args()
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -29,7 +28,7 @@ cpc_dir = args.cpc_dir      # /Users/tj/data/usa_cpc_nc/merged/
 
 # climate model data, monthly
 cmip5 = read_nc_files(cmip5_dir)
-cmip5.time = pandas.to_datetime(cmip5.  time.values)
+cmip5.time = pandas.to_datetime(cmip5.time.values)
 cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
 
 # daily data to monthly
@@ -42,7 +41,6 @@ data = DownscaleData(cmip5, monthlycpc)
 if rank == 0:
    ## lets split up our y's
    pairs = data.location_pairs('lat', 'lon')[:size]
-   print "Number of pairs:", len(data.location_pairs('lat', 'lon'))
 else:
    pairs = None
 
@@ -56,4 +54,9 @@ res['time_to_execute'] = time.time() - t0
 newData = comm.gather(res, root=0)
 
 if rank == 0:
-	sys.stdout.write(newData)
+   import json
+   sys.stdout.write("New data type" + type(newData).__name__ + "\nresults type:" + type(newData[0]).__name__)
+   with open('results.txt', 'w') as outfile:
+       json.dump(newData, outfile)
+
+   sys.stdout.write("\n".join([str(d) for d in newData]))
