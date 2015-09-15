@@ -71,7 +71,7 @@ class DownscaleData:
         t0values = t0values.squeeze()
 
         pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] != -999.]
-        return numpy.array(pairs)
+        return pairs
 
 def read_nc_files(dir):
     files = [os.path.join(dir, f) for f in os.listdir(dir) if ".nc" == f[-3:]]
