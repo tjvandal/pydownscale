@@ -1,6 +1,6 @@
-'#!/shared/apps/sage/sage-5.12/spkg/bin/sage -python'
+#!/shared/apps/sage/sage-5.12/spkg/bin/sage -python
 import sys
-#sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
+sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
 
 from mpi4py import MPI
 from scipy.stats import pearsonr, spearmanr, kendalltau
@@ -56,5 +56,3 @@ newData = comm.gather(res, root=0)
 if rank == 0:
    data = pandas.DataFrame(newData)
    data.to_csv("results.csv", index=False)
-
-"mpirun -np 2 python mpi_linearregression.py --cmip5_dir /Users/tj/data/cmip5/access1-0/ --cpc_dir /Users/tj/data/usa_cpc_nc/merged/"
