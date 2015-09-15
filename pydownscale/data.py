@@ -1,6 +1,6 @@
 
 import xray
-import os, time
+import os, time, sys
 import numpy
 import pandas
 from scipy.misc import factorial
@@ -38,6 +38,11 @@ class DownscaleData:
     def get_covariate_indices(self):
         return self.cmip.flatten()
 
+    def normalize_monthly(self):
+        climatology = self.cmip.groupby('time.month').mean('time')
+        std = self.cmip.groupby('time.month').std('time')
+        self.cmip -= climatology
+        self.cmip /= std
 
     def get_X(self):
         self.cmip.load()
@@ -101,6 +106,8 @@ if __name__ == "__main__":
     monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
     d = DownscaleData(cmip5, monthlycpc)
+    d.normalize_monthly()
+
     print "getting covariates"
     print d.location_pairs('lat', 'lon')
     print d.location_pairs('lon', 'lat')
