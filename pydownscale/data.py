@@ -39,10 +39,14 @@ class DownscaleData:
         return self.cmip.flatten()
 
     def normalize_monthly(self):
-        climatology = self.cmip.groupby('time.month').mean('time')
+        def standardize_time(x):
+            return (x - x.mean('time')) / x.std('time')
+        temp = self.cmip.groupby('time.month').apply(standardize_time)
+        mu = self.cmip.groupby('time.month').mean('time')
         std = self.cmip.groupby('time.month').std('time')
-        self.cmip -= climatology
-        self.cmip /= std
+        self.cmip = self.cmip.groupby('time.month') - mu
+        self.cmip = self.cmip.groupby('time.month') / std
+        print "are these equal", temp == self.cmip
 
     def get_X(self):
         self.cmip.load()
@@ -101,13 +105,10 @@ if __name__ == "__main__":
     # daily data to monthly
     cpc = read_nc_files(cpc_dir)
     cpc.time = pandas.to_datetime(cpc.time.values)
-    #cpc.load()
+    cpc.load()
     print "resampling cpc"
     monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
     d = DownscaleData(cmip5, monthlycpc)
     d.normalize_monthly()
-
-    print "getting covariates"
-    print d.location_pairs('lat', 'lon')
-    print d.location_pairs('lon', 'lat')
+    d.get_X()
