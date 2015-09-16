@@ -70,7 +70,7 @@ if __name__ == "__main__":
     from sklearn.linear_model import Lasso, LinearRegression
     import time
     t0 = time.time()
-    cmip5_dir = "/Users/tj/data/cmip5/access1-0/"
+    cmip5_dir = "/Users/tj/data/cmip5/access1-3/"
     cpc_dir = "/Users/tj/data/usa_cpc_nc/merged"
 
     # climate model data, monthly
@@ -87,8 +87,8 @@ if __name__ == "__main__":
     data = DownscaleData(cmip5, monthlycpc)
     data.normalize_monthly()
     # print "Data Normalized: %d" % (time.time() - t0)
-    linearmodel = LinearRegression()
-    dmodel = DownscaleModel(data, linearmodel) #, season='DJF')
+    linearmodel = Lasso()
+    dmodel = DownscaleModel(data, linearmodel, season='DJF')
     dmodel.train(location={'lat': 31.875, 'lon': -81.375})
     print dmodel.get_results()
     print "Time to downscale: %d" % (time.time() - t0)
