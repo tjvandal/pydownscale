@@ -37,17 +37,17 @@ cpc = read_nc_files(cpc_dir)
 monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
 data = DownscaleData(cmip5, monthlycpc)
-
+data.normalize_monthly()
 if rank == 0:
    ## lets split up our y's
-   pairs = data.location_pairs('lat', 'lon')[:size]
+   pairs = data.location_pairs('lat', 'lon')[:size]   ## lets chunk this data up into size parts
 else:
    pairs = None
 
 pairs = comm.scatter(pairs, root=0)
 t0 = time.time()
 linearmodel = LinearRegression()
-dmodel = DownscaleModel(data, linearmodel)
+dmodel = DownscaleModel(data, linearmodel)   ## include seasons
 dmodel.train(location={'lat': pairs[0], 'lon': pairs[1]})
 res = dmodel.get_results()
 res['time_to_execute'] = time.time() - t0
