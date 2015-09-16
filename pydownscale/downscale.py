@@ -62,12 +62,17 @@ class DownscaleModel:
         results['y_mean'] = numpy.mean(y)
         results['yhat_std'] = numpy.std(yhat)
         results['y_std'] = numpy.std(y)
+        results['model_name'] = self.model.__class__.__name__
+        results['season'] = self.season
+        if hasattr(self.model, "alpha_"):
+            results["lasso_alpha"] = self.model.alpha_
+
         return results
 
 
 if __name__ == "__main__":
     import pandas
-    from sklearn.linear_model import Lasso, LinearRegression
+    from sklearn.linear_model import LassoCV, LinearRegression
     import time
     t0 = time.time()
     cmip5_dir = "/Users/tj/data/cmip5/access1-3/"
@@ -83,12 +88,18 @@ if __name__ == "__main__":
     cpc.load()
     monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
-    print "Data Loaded: %d" % (time.time() - t0)
+    print "Data Loaded: %d seconds" % (time.time() - t0)
     data = DownscaleData(cmip5, monthlycpc)
     data.normalize_monthly()
+
     # print "Data Normalized: %d" % (time.time() - t0)
-    linearmodel = Lasso()
+    linearmodel = LassoCV(alphas=[1, 10, 100, 1000])
     dmodel = DownscaleModel(data, linearmodel, season='DJF')
     dmodel.train(location={'lat': 31.875, 'lon': -81.375})
+    X = dmodel.X_test
+    nonzero = numpy.where(dmodel.model.coef_ != 0)[0]
+    print "chosen alpha", dmodel.model.alpha_
+    print "NON zero indicies", nonzero, sum(numpy.abs(dmodel.model.coef_))
+    print X[:, nonzero]
     print dmodel.get_results()
     print "Time to downscale: %d" % (time.time() - t0)

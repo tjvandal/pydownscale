@@ -40,8 +40,10 @@ class DownscaleData:
 
     def normalize_monthly(self):
         def standardize_time(x):
-            return (x - x.mean('time')) / x.std('time')
+            z = (x - x.mean('time')) / x.std('time')
+            return z
         self.cmip = self.cmip.groupby('time.month').apply(standardize_time)
+        del self.cmip['month']  ## why is the month variable created?
 
     def get_X(self):
         self.cmip.load()
