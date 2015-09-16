@@ -41,12 +41,7 @@ class DownscaleData:
     def normalize_monthly(self):
         def standardize_time(x):
             return (x - x.mean('time')) / x.std('time')
-        temp = self.cmip.groupby('time.month').apply(standardize_time)
-        mu = self.cmip.groupby('time.month').mean('time')
-        std = self.cmip.groupby('time.month').std('time')
-        self.cmip = self.cmip.groupby('time.month') - mu
-        self.cmip = self.cmip.groupby('time.month') / std
-        print "are these equal", temp == self.cmip
+        self.cmip = self.cmip.groupby('time.month').apply(standardize_time)
 
     def get_X(self):
         self.cmip.load()
@@ -93,7 +88,7 @@ def read_nc_files(dir):
     return data
 
 if __name__ == "__main__":
-    cmip5_dir = "/Users/tj/data/cmip5/access1-0/"
+    cmip5_dir = "/Users/tj/data/cmip5/access1-3/"
     cpc_dir = "/Users/tj/data/usa_cpc_nc/merged"
 
     # climate model data, monthly
@@ -112,3 +107,10 @@ if __name__ == "__main__":
     d = DownscaleData(cmip5, monthlycpc)
     d.normalize_monthly()
     d.get_X()
+    print d.cmip['latitude'].values
+    print d.cmip['longitude'].values
+    prcp = d.cmip.loc[{'latitude': 24.5, 'longitude': 102.5}]
+
+    from matplotlib import pyplot
+    pyplot.hist(prcp['tas'].values)
+    pyplot.show()
