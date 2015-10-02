@@ -3,12 +3,13 @@ import numpy
 from matplotlib import pyplot
 from data import DownscaleData, read_nc_files
 from downscale import DownscaleModel
+import sys
 
 class pMSSL:
-    def __init__(self):
-        pass
+    def __init__(self, max_epochs=1000):
+        self.max_epochs = max_epochs
 
-    def train(self,X,y,lambd=2., rho=1.):
+    def train(self,X,y,lambd=1., rho=1.):
         self.X = X
         self.y = y
         self.rho = rho
@@ -22,7 +23,7 @@ class pMSSL:
         costdiff = 10
         t = 0
         costs = []
-        while costdiff > .1:
+        while (costdiff > 10e-3) and (t < self.max_epochs):
             self.W = self._w_update()
             self.Omega = self._omega_update(self.Omega)
             curr_cost, _ = self._w_cost(self.W)
@@ -31,7 +32,7 @@ class pMSSL:
                 costdiff = curr_cost
                 prevcost = curr_cost
             else:
-                costdiff = prevcost - curr_cost
+                costdiff = numpy.abs(prevcost - curr_cost)
                 prevcost = curr_cost
             t += 1
             print "iteration %i, costdiff: %f" % (t, costdiff)
@@ -62,26 +63,28 @@ class pMSSL:
         j = 0
         dualresid = 10e6
         resid = []
-        while dualresid > 0.001 :
+        while (dualresid > 0.01) or (j < 10): # force 10 iterations,
             S = self.W.T.dot(self.W)
             L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
             Omega_tilde = numpy.eye(self.K)
             numpy.fill_diagonal(Omega_tilde, (L + numpy.sqrt(L**2 + 4*self.rho))/(2*self.rho))
             Omega = Q.dot(Omega_tilde).dot(Q.T)
-            Z_prev = Z #.copy()
+            Z_prev = Z.copy()
             Z = self.softthreshold(Omega + U, self.lambd/self.rho)
             U = U + Omega - Z
             dualresid = numpy.linalg.norm(self.rho * self.X.T.dot(self.y).dot(Z - Z_prev), 2)
            # dualresid = numpy.linalg.norm(self.rho * (Z - Z_prev), 2)
-            if j % 100 == 0:
+            Z = self.softthreshold(Omega + U, self.lambd/self.rho)
+            if j % 500 == 1:
                 print "omega update:", j, "Dualresid:", dualresid
             j+=1
             resid.append(dualresid)
-            if j % 1000 == 0:
+            if j % 100 == 0:
                 #pyplot.plot(resid)
                 #pyplot.draw()
                 #pyplot.show()
                 resid = []
+
         return Omega
 
     def _w_update(self, tk=1.):
@@ -89,8 +92,7 @@ class pMSSL:
         W = self.W
         j = 0
         tk = 1/(2*numpy.linalg.norm(self.X.T.dot(self.X), 1)) # tk exits in (0, 1/||X.T*X||)
-        print "tk:", tk
-        while (costdiff > 5):
+        while costdiff > 0.01:
             cost, gmat = self._w_cost(W)
 
             W = self.shrinkage_threshold(W - tk*gmat, alpha=self.lambd*tk)
@@ -99,8 +101,8 @@ class pMSSL:
             else:
                 costdiff = numpy.abs(costprev - cost)
             costprev = cost
-            if j % 100 == 1:
-                print "W update:", j, ", Cost diff:", costdiff
+            #if j % 100 == 1:
+            #    print "W update:", j, ", Cost diff:", costdiff
             if j > 1000:
                 print "Warning: W did not converge."
                 break
@@ -125,8 +127,8 @@ def test1():
     d = 30
     k = 14
     W = numpy.random.normal(size=(d,k))
-    W[:,:4] += numpy.random.normal(0, 5, size=(d,1))
-    W[:,5:10] += numpy.random.normal(0, 5, size=(d,1))
+    W[:, :4] += numpy.random.normal(0, 5, size=(d,1))
+    W[:, 5:10] += numpy.random.normal(0, 5, size=(d,1))
     X = numpy.random.uniform(size=(n,d))
     y = X.dot(W)
     mssl = pMSSL()
@@ -172,7 +174,7 @@ def climatetest():
     #pyplot.show()
 
 if __name__ == "__main__":
-    #test1()
-    climatetest()
+    test1()
+    #climatetest()
 
 
