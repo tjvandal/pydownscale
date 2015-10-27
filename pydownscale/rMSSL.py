@@ -7,15 +7,14 @@ from data import DownscaleData, read_nc_files
 from downscale import DownscaleModel
 import sys
 from scipy.linalg import solve_sylvester
-
-numpy.random.seed(1)
+import time
 
 class pMSSL:
     def __init__(self, max_epochs=1000, quite=False):
         self.max_epochs = max_epochs
         self.quite = quite
 
-    def train(self,X, y, lambd=1e-4, gamma=1e-4, rho=1e-4):
+    def train(self,X, y, lambd=1e-4, gamma=1e-4, rho=1e-4, wadmm=True):
         self.X = X
         self.y = y
         self.rho = rho
@@ -28,14 +27,20 @@ class pMSSL:
         self.lambd = lambd
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.2f, Gamma: %0.2f" % (self.K, self.d, self.n, self.lambd, self.gamma)
         costdiff = 10
+        omegatime = 0.
+        wtime = 0.
         t = 0
         costs = []
         while (costdiff > 10e-3) and (t < self.max_epochs):
-            self.W = self._w_update_admm(rho=self.rho)
-            #print self.W[:5, :5]
-            #self.W = self._w_update()
-            #print self.W[:5,:5]
+            tw = time.time()
+            if wadmm:
+                self.W = self._w_update_admm(rho=self.rho)
+            else:
+                self.W = self._w_update()
+            wtime += (time.time() - tw)
+            to = time.time()
             self.Omega = self._omega_update(self.Omega, rho=self.rho)
+            omegatime += (time.time() - to)
             curr_cost = self.cost(self.W, self.Omega)
             costs.append(curr_cost)
             if t == 0:
@@ -47,6 +52,9 @@ class pMSSL:
             t += 1
             if not self.quite:
                 print "iteration %i, costdiff: %f" % (t, costdiff)  
+
+        print "Amount of time to train Omega: %f" % omegatime
+        print "Amount of time to train W:     %f" % wtime
 
     def cost(self, W, Omega):
         cost, _ = self._w_cost(W)
@@ -81,7 +89,7 @@ class pMSSL:
         epsabs = 1e-3
         epsrel = 1e-3
         epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y,2)
-        for j in range(500): # force 10 iterations,
+        for j in range(1000): # force 10 iterations,
             L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
             Omega_tilde = numpy.eye(self.K)
             numpy.fill_diagonal(Omega_tilde, (L + numpy.sqrt(L**2 + 4*rho))/(2*rho))
@@ -89,6 +97,7 @@ class pMSSL:
             Z_prev = Z.copy()
             Z = self.softthreshold(Omega + U, self.lambd/rho)
             U = U + Omega - Z
+            
             dualresid = numpy.linalg.norm(self.rho * (Z - Z_prev), 2)
             primalresid = numpy.linalg.norm(Omega - Z, 2)
             epspri = numpy.sqrt(self.d) * epsabs + epsrel * numpy.max([numpy.linalg.norm(Omega, 2), numpy.linalg.norm(Z, 2), 0])
@@ -101,8 +110,7 @@ class pMSSL:
                 break
 
 
-        if not self.quite:
-            print "Omega Converged at", j
+        #if not self.quite:
         return Omega
 
    # Lets save the proximal descent update
@@ -110,47 +118,56 @@ class pMSSL:
         costdiff = 10e6
         W = self.W
         j = 0
+        t0 = time.time()
         tk = 1/(2*numpy.linalg.norm(self.X.T.dot(self.X), 1)) # tk exits in (0, 1/||X.T*X||)
-        while costdiff > 1e-3:
-            cost, gmat = self._w_cost(W)
+        XX = self.X.T.dot(self.X)
+        XY = self.X.T.dot(self.y)
+        while costdiff > 1e-6:
+            cost, gmat = self._w_cost(W, XX=XX, XY=XY)
             W = self.shrinkage_threshold(W - tk*gmat, alpha=self.lambd*tk)
-
             if j == 0:
                 costdiff = numpy.abs(cost)
             else:
                 costdiff = numpy.abs(costprev - cost)
             costprev = cost
-            if (j > 10000) and (not self.quite):
+            if (j > 10000):
                 print "Warning: W did not converge."
                 break
             j += 1
+
         return W
 
     # Lets parallelize this
-    def _w_cost(self, W):
+    def _w_cost(self, W, XX=None, XY=None):
         XW = self.X.dot(W)
-        cost = 0.5 * numpy.trace((XW - self.y).T.dot(XW - self.y))
-        cost += self.gamma * numpy.trace(W.dot(self.Omega).dot(W.T))
-        gmat = (self.X.T.dot(XW) - self.X.T.dot(self.y))/len(self.y)  # the gradients
+        if XX is None:
+            XX = self.X.T.dot(self.X)
+        if XY is None:
+            XY = self.X.T.dot(self.y)
+        f = (self.y-XW).T.dot((self.y-XW)) / (2*len(self.y))
+        f += self.lambd*numpy.trace(W.dot(self.Omega).dot(W.T))
+        gmat = (XX.dot(W) - XY)/len(self.y)  # the gradients
         gmat += 2*W.dot(self.Omega) # *self.lambd
-        return cost, gmat
+        return numpy.sum(f), gmat
 
     def _w_update_admm(self, rho):
         maxrho = 10
         Z = numpy.zeros(shape=(self.d, self.K))
         U = numpy.zeros(shape=(self.d, self.K))
         j = 0
-        XX = self.X.T.dot(self.X)
-        Xy = self.X.T.dot(self.y)
-        Theta = self.W.copy()
+        XX = self.X.T.dot(self.X)  # dxd
+        Xy = self.X.T.dot(self.y)  # dxk
+        Theta = self.W.copy()      # dxk
         epsabs = 1e-3
         epsrel = 1e-3
         epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y,2)
-
+        tsum = 0.
         for j in range(500):
             prevTheta = Theta.copy()
             C = Xy + rho * (Z - U)
+            t0 = time.time()
             Theta = solve_sylvester(XX + rho * numpy.eye(XX.shape[0]), self.Omega, C)
+            tsum += time.time() - t0
             Z_prev = Z.copy()
             Z = self.softthreshold(Theta + U, self.gamma/rho)
             U = U + Theta - Z
@@ -165,8 +182,8 @@ class pMSSL:
             if (dualresid < epsdual) and (primalresid < epspri):
                 break
             
-        W = Theta
-        return W
+        print "Time to solve W with ADMM:", tsum, j
+        return Theta
 
     def predict(self, X):
         return X.dot(self.W)
@@ -174,9 +191,10 @@ class pMSSL:
 def test1():
     import time
     t0 = time.time()
-    n = 100
-    d = 10000
-    k = 1000
+    n = 10000
+    ntrain = int(n*0.80)
+    d = 100
+    k = 9
     W = numpy.random.normal(size=(d, k))
     W[:, :20] += numpy.random.normal(0, 10, size=(d, 1))
     W[:, 20:100] += numpy.random.normal(0, 10, size=(d, 1))
@@ -208,28 +226,32 @@ def test1():
     pyplot.imshow(bestmssl.Omega, interpolation="none", cmap="Reds")
     pyplot.savefig("test2fig.pdf")
     print "Time to run:", time.time() - t0
+
+
 def test2():
-    n = 60
-    d = 30
-    k = 14
+    n = 10000
+    d = 1000
+    k = 1000
     l = 1e1
     g = 1e1
-
+    tt = time.time()
     W = numpy.random.normal(size=(d, k))
     W[:, :4] += numpy.random.normal(0, 10, size=(d, 1))
     W[:, 5:10] += numpy.random.normal(0, 10, size=(d, 1))
-    print W[:5,:15]
+    #print W[:5,:15]
     X = numpy.random.uniform(-1, 1, size=(n, d))
     y = X.dot(W)
     mssl = pMSSL(max_epochs=50, quite=True)
-    mssl.train(X, y, rho=1e-4, gamma=g, lambd=l)
+    mssl.train(X, y, rho=1e-4, gamma=g, lambd=l, wadmm=False)
     mssl.Omega[numpy.abs(mssl.Omega) < 1e-10] = 0
-    print mssl.W[:5, :15]
-    print mssl.Omega
+    #print mssl.W[:5, :15]
+    #print mssl.Omega
     #pyplot.imshow(numpy.linalg.inv(mssl.Omega))
     pyplot.imshow(mssl.Omega, interpolation="none", cmap="Reds")
     pyplot.title("Lamdba %f, Gamma %f" % (l, g))
     pyplot.savefig("test1.pdf")
+    print "Time to train: ", time.time() - tt
+    return mssl
 
 def climatetest():
     import time
@@ -268,6 +290,6 @@ def climatetest():
     #pyplot.show()
 
 if __name__ == "__main__":
-    test1()
+    ms = test2()
     #climatetest()
 
