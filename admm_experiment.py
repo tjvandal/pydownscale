@@ -23,9 +23,9 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-tasks = [10, 100, 1000]
-dims = [10, 100, 1000]
-admmw = [True, False]
+tasks = [100]
+dims = [10000]
+admmw = [True]
 
 n = 100
 ntrain = int(0.80*n)
@@ -72,5 +72,5 @@ if rank == 0:
    newData = [item for l in newData for item in l]   ## condense lists of lists
    print newData
    data = pandas.DataFrame(newData)
-   data.to_csv("admm-results-9.csv", index=False)
+   data.to_csv("admm-large-d-results.csv", index=False)
    print data
