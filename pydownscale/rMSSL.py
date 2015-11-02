@@ -16,7 +16,7 @@ class pMSSL:
         self.quite = quite
         self.gamma = gamma
 
-    def fit(self,X, y, rho=1e-4, wadmm=False):
+    def fit(self,X, y, rho=1e-4, wadmm=True):
         self.X = X
         self.y = y
         self.rho = rho
@@ -51,15 +51,16 @@ class pMSSL:
                 costdiff = numpy.abs(prevcost - curr_cost)
                 prevcost = curr_cost
             t += 1
-            if not self.quite:
-                print "iteration %i, costdiff: %f" % (t, costdiff)  
+            #if not self.quite:
+            print "iteration %i, costdiff: %f" % (t, costdiff)
 
         #print "Amount of time to train Omega: %f" % omegatime
         #print "Amount of time to train W:     %f" % wtime
 
     def cost(self, W, Omega):
         cost, _ = self._w_cost(W)
-        cost += -self.K/2.*numpy.log(numpy.linalg.det(Omega)) 
+        if numpy.sum(Omega) != 0:
+            cost -= self.K/2.*numpy.log(numpy.linalg.det(Omega))
         cost += self.lambd * numpy.linalg.norm(Omega, 1)
         return cost 
 
@@ -147,7 +148,8 @@ class pMSSL:
             XX = self.X.T.dot(self.X)
         if XY is None:
             XY = self.X.T.dot(self.y)
-        f = (self.y-XW).T.dot((self.y-XW)) / (2*len(self.y))
+        f = 0.5*numpy.linalg.norm(self.y - XW, 2)
+        #f = (self.y-XW).T.dot((self.y-XW)) / (2*len(self.y))
         f += self.lambd*numpy.trace(W.dot(self.Omega).dot(W.T))
         gmat = (XX.dot(W) - XY)/len(self.y)  # the gradients
         gmat += 2*W.dot(self.Omega) # *self.lambd
@@ -165,7 +167,7 @@ class pMSSL:
         epsrel = 1e-3
         epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y,2)
         tsum = 0.
-        for j in range(500):
+        for j in range(5000):
             prevTheta = Theta.copy()
             C = Xy + rho * (Z - U)
             t0 = time.time()
@@ -183,9 +185,10 @@ class pMSSL:
             epspri = numpy.sqrt(self.d) * epsabs + epsrel * numpy.max([numpy.linalg.norm(Theta, 2), numpy.linalg.norm(Z, 2), 0])
             
             if (dualresid < epsdual) and (primalresid < epspri):
+                #print "Converged in %i" % j
                 break
-            
-        return Theta
+
+        return Z
 
     def predict(self, X):
         return X.dot(self.W)
@@ -208,7 +211,7 @@ def test1():
     for j, g in enumerate(10**numpy.linspace(-1, 2, 4)):
         for i, l in enumerate(10**numpy.linspace(-1, 2, 4)):
             try:
-                mssl.fit(X[:70], y[:70], rho=1e-4, gamma=g, lambd=l)
+                mssl.fit(X[:70], y[:70], rho=1., gamma=g, lambd=l)
             except:
                 print "Pass -- Lamdba %f, Gamma %f" % (l, g)
                 continue
@@ -234,9 +237,9 @@ def test2():
     numpy.random.seed(1)
     n = 200
     d = 20
-    k = 1
-    l = 0
-    g = 1e1
+    k = 10
+    l = 1
+    g = 1
     train = 50
     tt = time.time()
     W = numpy.random.normal(size=(d, k))
@@ -246,7 +249,7 @@ def test2():
     X = numpy.random.uniform(-1, 1, size=(n, d))
     y = X.dot(W)
     mssl = pMSSL(max_epochs=50, quite=True, gamma=g, lambd=l)
-    mssl.fit(X[:train], y[:train], rho=1e-4,  wadmm=True)
+    mssl.fit(X[:train], y[:train], rho=1e-2,  wadmm=True)
     yhat = mssl.predict(X[train:])
     print mssl.W[:10, 0]
     print W[:10, 0]
@@ -264,10 +267,10 @@ def test2():
 
     #print mssl.W[:5, :15]
     #print mssl.Omega
-    #pyplot.imshow(numpy.linalg.inv(mssl.Omega))
-    pyplot.imshow(mssl.Omega, interpolation="none", cmap="Reds")
+    pyplot.imshow(numpy.linalg.inv(mssl.Omega),interpolation="none", cmap="Reds")
+    #pyplot.imshow(mssl.Omega, interpolation="none", cmap="Reds")
     pyplot.title("Lamdba %f, Gamma %f" % (l, g))
-    #pyplot.show()
+    pyplot.show()
     #pyplot.savefig("test1.pdf")
     #print "Time to train: ", time.time() - tt
     #return mssl

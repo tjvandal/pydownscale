@@ -40,20 +40,31 @@ print "X shape", X.shape
 print "Y shape", y.shape
 
 spearmans = []
+errs = []
 params = []
-for lambd in [1e-2, 1e0, 1e1, 1e2][:1]:
-    for gamma in [1e1, 1e0, 1e1, 1e2][:1]:
-        model = pMSSL(lambd=lambd, gamma=gamma)
+mssl_results = []
+f = open("mssl-experiment-results.txt", "w")
+for lambd in [0, 1e0, 1e1, 1e2][:1]:
+    for gamma in [1e0, 1e1/2, 1e1]:
+        model = pMSSL(lambd=lambd, gamma=gamma, max_epochs=100)
         dmodel = DownscaleModel(data, model, season=season)
         dmodel.train()
         results = dmodel.get_results()
         spear = pandas.DataFrame(results).spearman.mean()
+        rmse = pandas.DataFrame(results).rmse.mean()
         spearmans.append(spear)
+        errs.append(rmse)
         params.append({'gamma': gamma, "lambda": lambd})
-        print spear
+        mssl_results.append(pandas.DataFrame(results))
+
+print results
+results = pandas.concat(mssl_results)
+results.to_csv("mssl-experiment-results.csv")
 
 idx = numpy.argmax(spearmans)
+print "Max MSSL Spearman: %f" % max(spearmans) + str(params[idx]) + "\n"
 print "Max MSSL Spearman:", max(spearmans), params[idx], "\n"
+print "Max RMSE:", numpy.min(rmse)
 
 pairs = data.location_pairs("lat", "lon")
 lasso_results = []
@@ -64,9 +75,11 @@ for p in pairs:
     lasso_results += m1.get_results()
 
 print "Lasso", pandas.DataFrame(lasso_results).spearman.mean(), "\n"
+pandas.DataFrame(lasso_results).to_csv("lasso-results.csv")
 
 mlasso = MultiTaskLassoCV(alphas=[0.01, 1, 10, 100])
 model2 = DownscaleModel(data, mlasso, season=season)
 model2.train()
 results2 = model2.get_results()
 print "MLLasso", pandas.DataFrame(results2).spearman.mean()
+pandas.DataFrame(results2).to_csv("mtlasso-results.csv")

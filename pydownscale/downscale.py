@@ -81,11 +81,12 @@ class DownscaleModel:
                 r = row[1]
                 res = {n: r[i] for i, n in enumerate(names)}
                 res.update(self._stats(y[:, j], yhat[:, j], test_set=test_set))
-                results.append(res)
 
-        if hasattr(self.model, "alpha_"):
-            print "Alpha", self.model.alpha_
-            #results["lasso_alpha"] = self.model.alpha_
+
+                if hasattr(self.model, "alpha_"):
+                    res["lasso_alpha"] = numpy.mean(self.model.alpha_)
+                results.append(res)
+            pass
 
         return results
 

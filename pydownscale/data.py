@@ -85,7 +85,16 @@ class DownscaleData:
         t0values = t0array.values
         if dim1_axis > dim2_axis:
             t0values = numpy.swapaxes(t0values, dim1_axis, dim2_axis)
+
         t0values = t0values.squeeze()
+
+        if isinstance(t0values, float):
+            t0values = numpy.array(t0values)
+            t0values = t0values[:, numpy.newaxis]
+        elif len(Y.coords[dim1].values) == 1:
+            t0values = t0values[numpy.newaxis, :]
+        elif len(Y.coords[dim2].values) == 1:
+            t0values = t0values[:, numpy.newaxis]
 
         pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] != -999.]
         return pairs
