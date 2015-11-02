@@ -1,7 +1,7 @@
 __author__ = 'tj'
 import numpy
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 from matplotlib import pyplot
 from data import DownscaleData, read_nc_files
 from downscale import DownscaleModel
@@ -10,28 +10,29 @@ from scipy.linalg import solve_sylvester
 import time
 
 class pMSSL:
-    def __init__(self, max_epochs=1000, quite=False):
+    def __init__(self, max_epochs=1000, quite=True, lambd=1e-4, gamma=1e-4):
+        self.lambd = lambd
         self.max_epochs = max_epochs
         self.quite = quite
+        self.gamma = gamma
 
-    def train(self,X, y, lambd=1e-4, gamma=1e-4, rho=1e-4, wadmm=True):
+    def fit(self,X, y, rho=1e-4, wadmm=False):
         self.X = X
         self.y = y
         self.rho = rho
-        self.gamma = gamma
         self.K = self.y.shape[1]
         self.n = self.y.shape[0]
         self.d = self.X.shape[1]
         self.Omega = numpy.eye(self.K)
         self.W = numpy.zeros(shape=(self.d, self.K))
-        self.lambd = lambd
+
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.2f, Gamma: %0.2f" % (self.K, self.d, self.n, self.lambd, self.gamma)
         costdiff = 10
         omegatime = 0.
         wtime = 0.
         t = 0
         costs = []
-        while (costdiff > 10e-3) and (t < self.max_epochs):
+        while (costdiff > 1e-3) and (t < self.max_epochs):
             tw = time.time()
             if wadmm:
                 self.W = self._w_update_admm(rho=self.rho)
@@ -53,8 +54,8 @@ class pMSSL:
             if not self.quite:
                 print "iteration %i, costdiff: %f" % (t, costdiff)  
 
-        print "Amount of time to train Omega: %f" % omegatime
-        print "Amount of time to train W:     %f" % wtime
+        #print "Amount of time to train Omega: %f" % omegatime
+        #print "Amount of time to train W:     %f" % wtime
 
     def cost(self, W, Omega):
         cost, _ = self._w_cost(W)
@@ -79,6 +80,8 @@ class pMSSL:
             [lambda X: X - thres, 0, lambda X: X+thres])
 
     def _omega_update(self, Omega, rho):
+        if self.lambd == 0:
+            return numpy.zeros(shape=Omega.shape)
         maxrho = 10
         Z = numpy.zeros(shape=(self.K, self.K))
         U = numpy.zeros(shape=(self.K, self.K))
@@ -124,13 +127,13 @@ class pMSSL:
         XY = self.X.T.dot(self.y)
         while costdiff > 1e-6:
             cost, gmat = self._w_cost(W, XX=XX, XY=XY)
-            W = self.shrinkage_threshold(W - tk*gmat, alpha=self.lambd*tk)
+            W = self.shrinkage_threshold(W - tk*gmat, alpha=self.gamma*tk)
             if j == 0:
                 costdiff = numpy.abs(cost)
             else:
                 costdiff = numpy.abs(costprev - cost)
             costprev = cost
-            if (j > 10000):
+            if (j > 20000):
                 print "Warning: W did not converge."
                 break
             j += 1
@@ -182,7 +185,6 @@ class pMSSL:
             if (dualresid < epsdual) and (primalresid < epspri):
                 break
             
-        print "Time to solve W with ADMM:", tsum, j
         return Theta
 
     def predict(self, X):
@@ -206,7 +208,7 @@ def test1():
     for j, g in enumerate(10**numpy.linspace(-1, 2, 4)):
         for i, l in enumerate(10**numpy.linspace(-1, 2, 4)):
             try:
-                mssl.train(X[:70], y[:70], rho=1e-4, gamma=g, lambd=l)
+                mssl.fit(X[:70], y[:70], rho=1e-4, gamma=g, lambd=l)
             except:
                 print "Pass -- Lamdba %f, Gamma %f" % (l, g)
                 continue
@@ -229,11 +231,13 @@ def test1():
 
 
 def test2():
-    n = 10000
-    d = 1000
-    k = 1000
-    l = 1e1
+    numpy.random.seed(1)
+    n = 200
+    d = 20
+    k = 1
+    l = 0
     g = 1e1
+    train = 50
     tt = time.time()
     W = numpy.random.normal(size=(d, k))
     W[:, :4] += numpy.random.normal(0, 10, size=(d, 1))
@@ -241,17 +245,32 @@ def test2():
     #print W[:5,:15]
     X = numpy.random.uniform(-1, 1, size=(n, d))
     y = X.dot(W)
-    mssl = pMSSL(max_epochs=50, quite=True)
-    mssl.train(X, y, rho=1e-4, gamma=g, lambd=l, wadmm=False)
-    mssl.Omega[numpy.abs(mssl.Omega) < 1e-10] = 0
+    mssl = pMSSL(max_epochs=50, quite=True, gamma=g, lambd=l)
+    mssl.fit(X[:train], y[:train], rho=1e-4,  wadmm=True)
+    yhat = mssl.predict(X[train:])
+    print mssl.W[:10, 0]
+    print W[:10, 0]
+    print mssl.Omega
+
+    from scipy.stats import spearmanr
+    from sklearn.linear_model import Lasso
+    print "MSSL: Spearman", numpy.mean([spearmanr(yhat[:,i], y[train:,i])[0] for i in range(k)])
+
+    m = Lasso(alpha=g, max_iter=20000)
+    m.fit(X[:train, :], y[:train, 0])
+    yhat = m.predict(X[train:, :])
+    print m.coef_.T[:10]
+    print "MTLasso: Spearman ", spearmanr(yhat, y[train:, 0])[0]
+
     #print mssl.W[:5, :15]
     #print mssl.Omega
     #pyplot.imshow(numpy.linalg.inv(mssl.Omega))
     pyplot.imshow(mssl.Omega, interpolation="none", cmap="Reds")
     pyplot.title("Lamdba %f, Gamma %f" % (l, g))
-    pyplot.savefig("test1.pdf")
-    print "Time to train: ", time.time() - tt
-    return mssl
+    #pyplot.show()
+    #pyplot.savefig("test1.pdf")
+    #print "Time to train: ", time.time() - tt
+    #return mssl
 
 def climatetest():
     import time
@@ -283,8 +302,8 @@ def climatetest():
     Y = Y.reshape(Y.shape[0], Y.shape[1]*Y.shape[2])
     
     mssl = pMSSL()
-    mssl.train(X[:70,:5000], Y[:70])
-    yhat = mssl.predict(X[70:,:5000])
+    mssl.fit(X[:70, :5000], Y[:70])
+    yhat = mssl.predict(X[70:, :5000])
     #pyplot.plot(yhat[70:,0])
     #pyplot.plot(Y[70:, 0], color='red')
     #pyplot.show()

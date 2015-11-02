@@ -45,17 +45,28 @@ class DownscaleData:
         self.cmip = self.cmip.groupby('time.month').apply(standardize_time)
         del self.cmip['month']  ## why is the month variable created?
 
-    def get_X(self):
+    def get_X(self, vars=None, timedim='time'):
         self.cmip.load()
-        X = self.cmip.to_array().values
-        dims = self.cmip.to_array().dims
-        times_axis = [j for j in range(len(dims)) if dims[j] == 'time'][0]
-        X = numpy.swapaxes(X, times_axis, 0)
-        ndim = 1
-        for j in X.shape[1:]:
-            ndim *= j
-        X = X.reshape((X.shape[0], ndim))
-        return X
+
+        if vars is None:
+            df = self.cmip.to_array().to_dataframe()
+        else:
+            df = self.cmip[vars].to_array().to_dataframe()
+
+        levels = [var for var in df.index.names if var != timedim]
+        return df.unstack(levels).values
+
+    def get_y(self, location=None, timedim='time'):
+        if location is not None:
+            y = self.observations.loc[location].to_array().values.squeeze()
+        else:
+            y = self.observations.to_array().to_dataframe()
+            levels = [var for var in y.index.names if var != timedim]
+            y = y.unstack(levels)
+            location = y.columns.to_series()
+            y = y.values
+
+        return y, location
 
     def location_pairs(self, dim1, dim2):
         Y = self.observations.to_array()
@@ -81,39 +92,64 @@ class DownscaleData:
 
 
 def read_nc_files(dir):
+    def rmheight(d):
+        #del d["height"]
+        return d
+
     files = [os.path.join(dir, f) for f in os.listdir(dir) if ".nc" == f[-3:]]
     if len(files) > 1:
-        data = xray.open_mfdataset(files)
+        data = xray.open_mfdataset(files, preprocess=rmheight)
     elif len(files) == 1:
         data = xray.open_dataset(files[0])
     else:
         raise IOError("There are no .nc files in that directory.")
     return data
 
+def assert_bounds(data, bounds):
+    '''
+    :param data: Should be an xray dataset
+    :param bounds: dictionary of bounds {'lat': [l1 ,l2], 'lon': [l3, l4]}
+    :return: xray dataset bounded by the bounds
+    '''
+    loc = {}
+    for b in bounds:
+        vals = data[b].values
+        loc[b] = vals[(bounds[b][0] < vals) & (bounds[b][1] > vals)]
+    return data.loc[loc]
+
 if __name__ == "__main__":
-    cmip5_dir = "/Users/tj/data/cmip5/access1-3/"
+    cmip5_dir = "/scratch/vandal.t/cmip5/historical/atm/mon/MIROC-ESM/"
     cpc_dir = "/Users/tj/data/usa_cpc_nc/merged"
 
     # climate model data, monthly
     cmip5 = read_nc_files(cmip5_dir)
-    #cmip5.load()
-    cmip5.time = pandas.to_datetime(cmip5.  time.values)
+    cmip5.load()
+    cmip5 = assert_bounds(cmip5, {'lat': [20, 35], 'lon': [100, 150]})
+
+    cmip5.time = pandas.to_datetime(cmip5.time.values)
     cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
 
     # daily data to monthly
     cpc = read_nc_files(cpc_dir)
-    cpc.time = pandas.to_datetime(cpc.time.values)
     cpc.load()
+    cpc.time = pandas.to_datetime(cpc.time.values)
+    cpc = assert_bounds(cpc, {'lat': [20, 35], 'lon': [-120, -100]})
+
     print "resampling cpc"
     monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
     d = DownscaleData(cmip5, monthlycpc)
+    print "Normalizing"
     d.normalize_monthly()
-    d.get_X()
-    print d.cmip['latitude'].values
-    print d.cmip['longitude'].values
-    prcp = d.cmip.loc[{'latitude': 24.5, 'longitude': 102.5}]
+    X = d.get_X(vars=['uas', 'vas', 'tasmax', 'tasmin', 'hurs'])
+    print d.location_pairs('lat', 'lon')
+
+    lt = d.cmip['lat'].values[0]
+    ln = d.cmip['lon'].values[0]
+    prcp = d.cmip.loc[{'lat':  lt, 'lon': ln}]
 
     from matplotlib import pyplot
+    import seaborn
+
     pyplot.hist(prcp['tas'].values)
     pyplot.show()

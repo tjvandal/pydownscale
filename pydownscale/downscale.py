@@ -1,9 +1,11 @@
-from data import DownscaleData, read_nc_files
+from data import DownscaleData, read_nc_files, assert_bounds
 import numpy
 from scipy.stats import pearsonr, spearmanr, kendalltau
+import config
+import pandas
 
 class DownscaleModel:
-    def __init__(self, data, model, training_size=0.70, season=None):
+    def __init__(self, data, model, training_size=config.train_percent, season=None, xvars=None):
         if data.__class__.__name__ != 'DownscaleData':
             raise TypeError("Data must be of type downscale data.")
         if not hasattr(model, "fit") or not hasattr(model, "predict"):
@@ -15,10 +17,10 @@ class DownscaleModel:
         if self.season:
             self.seasonidxs = numpy.where(self.data.cmip['time.season'] == self.season)[0]
 
-        self._split_dataset(training_size)
+        self._split_dataset(training_size, vars=xvars)
 
-    def _split_dataset(self, training_size):
-        X = self.data.get_X()
+    def _split_dataset(self, training_size, vars=None):
+        X = self.data.get_X(vars=vars)
         if self.season:
             X = X[self.seasonidxs, :]
 
@@ -27,9 +29,9 @@ class DownscaleModel:
         self.X_test = X[self.numtrain:]
 
     # include quantile mapping ability
-    def train(self, location):
-        self.location = location
-        y = self.data.observations.loc[location].to_array().values.squeeze()
+    def train(self, location=None):
+        y, self.location = self.data.get_y(location=location)
+
         if self.season:
             y = y[self.seasonidxs]
 
@@ -45,6 +47,20 @@ class DownscaleModel:
         else:
             return numpy.mean((self.y_train - self.yhat_train) ** 2)
 
+    def _stats(self, y, yhat, test_set=True):
+        res = {}
+        res['rmse'] = self.get_mse(test_set)**(0.5)
+        res['pearson'] = pearsonr(y, yhat)[0]
+        res['spearman'] = spearmanr(y, yhat)[0]
+        res['kendaltau'] = kendalltau(y, yhat)[0]
+        res['yhat_mean'] = numpy.mean(yhat)
+        res['y_mean'] = numpy.mean(y)
+        res['yhat_std'] = numpy.std(yhat)
+        res['y_std'] = numpy.std(y)
+        res['model_name'] = self.model.__class__.__name__
+        res['season'] = self.season
+        return res
+
     # add functionality: plotting, quantile mapping, distirbutions, correlations
     def get_results(self, test_set=True):
         if test_set:
@@ -53,19 +69,23 @@ class DownscaleModel:
         else:
             y = self.y_train
             yhat = self.yhat_train
-        results = self.location   ## dictionary of lat, lon
-        results['rmse'] = self.get_mse(test_set)**(0.5)
-        results['pearson'] = pearsonr(y, yhat)[0]
-        results['spearman'] = spearmanr(y, yhat)[0]
-        results['kendaltau'] = kendalltau(y, yhat)[0]
-        results['yhat_mean'] = numpy.mean(yhat)
-        results['y_mean'] = numpy.mean(y)
-        results['yhat_std'] = numpy.std(yhat)
-        results['y_std'] = numpy.std(y)
-        results['model_name'] = self.model.__class__.__name__
-        results['season'] = self.season
+
+        results = []
+        if isinstance(self.location, dict):
+            self.location.update(self._stats(y, yhat, test_set))
+            results.append(self.location)
+
+        elif isinstance(self.location, pandas.Series):
+            names = self.location.index.names
+            for j, row in enumerate(self.location.iteritems()):
+                r = row[1]
+                res = {n: r[i] for i, n in enumerate(names)}
+                res.update(self._stats(y[:, j], yhat[:, j], test_set=test_set))
+                results.append(res)
+
         if hasattr(self.model, "alpha_"):
-            results["lasso_alpha"] = self.model.alpha_
+            print "Alpha", self.model.alpha_
+            #results["lasso_alpha"] = self.model.alpha_
 
         return results
 
@@ -75,31 +95,45 @@ if __name__ == "__main__":
     from sklearn.linear_model import LassoCV, LinearRegression
     import time
     t0 = time.time()
-    cmip5_dir = "/Users/tj/data/cmip5/access1-3/"
-    cpc_dir = "/Users/tj/data/usa_cpc_nc/merged"
+
+    cmip5_dir = "/Users/tj/data/ncep_ncar_monthly/"
+    cpc_dir = "/Users/tj/data/usa_cpc_nc/merged/"
 
     # climate model data, monthly
     cmip5 = read_nc_files(cmip5_dir)
     cmip5.load()
+    cmip5 = assert_bounds(cmip5, {'lat': [15, 55], 'lon': [200, 320]})
     cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
 
     # daily data to monthly
     cpc = read_nc_files(cpc_dir)
     cpc.load()
+    cpc = assert_bounds(cpc, {'lat': [42, 42.5], 'lon': [-71, -70]})
     monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
 
     print "Data Loaded: %d seconds" % (time.time() - t0)
     data = DownscaleData(cmip5, monthlycpc)
     data.normalize_monthly()
+    pairs = data.location_pairs('lat', 'lon')
 
     # print "Data Normalized: %d" % (time.time() - t0)
-    linearmodel = LassoCV(alphas=[1, 10, 100, 1000])
-    dmodel = DownscaleModel(data, linearmodel, season='DJF')
-    dmodel.train(location={'lat': 31.875, 'lon': -81.375})
-    X = dmodel.X_test
+    linearmodel = LassoCV(alphas=[0.01, 0.1, 1, 10, 100], max_iter=2000)
+    #linearmodel = LinearRegression()
+    dmodel = DownscaleModel(data, linearmodel, season='DJF') #, xvars=['uas', 'vas', 'tasmax', 'tasmin', 'hurs'])
+    dmodel.train(location={'lat': pairs[0][0], 'lon': pairs[0][1]})
+    X = dmodel.X_train
+    y = dmodel.y_train
+    print dmodel.get_results()
+
+    from matplotlib import pyplot
+    import seaborn
+
+    pyplot.plot(dmodel.y_test)
+    pyplot.plot(dmodel.yhat_test)
+    pyplot.show()
     nonzero = numpy.where(dmodel.model.coef_ != 0)[0]
     print "chosen alpha", dmodel.model.alpha_
     print "NON zero indicies", nonzero, sum(numpy.abs(dmodel.model.coef_))
-    print X[:, nonzero]
-    print dmodel.get_results()
+    print X[:, nonzero].shape
+
     print "Time to downscale: %d" % (time.time() - t0)
