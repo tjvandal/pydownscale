@@ -11,7 +11,7 @@ import time
 
 class pMSSL:
     def __init__(self, max_epochs=1000, quite=True, lambd=1e-4, gamma=1e-4):
-        self.lambd = lambd
+        self.lambd = float(lambd)
         self.max_epochs = max_epochs
         self.quite = quite
         self.gamma = gamma
@@ -26,7 +26,7 @@ class pMSSL:
         self.Omega = numpy.eye(self.K)
         self.W = numpy.zeros(shape=(self.d, self.K))
 
-        print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.2f, Gamma: %0.2f" % (self.K, self.d, self.n, self.lambd, self.gamma)
+        print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
         costdiff = 10
         omegatime = 0.
         wtime = 0.
@@ -51,8 +51,8 @@ class pMSSL:
                 costdiff = numpy.abs(prevcost - curr_cost)
                 prevcost = curr_cost
             t += 1
-            #if not self.quite:
-            print "iteration %i, costdiff: %f" % (t, costdiff)
+            if not self.quite:
+                print "iteration %i, costdiff: %f, cost: %0.2f, omega zeros: %i" % (t, costdiff, curr_cost, numpy.sum(self.Omega == 0))
 
         #print "Amount of time to train Omega: %f" % omegatime
         #print "Amount of time to train W:     %f" % wtime
@@ -92,16 +92,17 @@ class pMSSL:
         S = self.W.T.dot(self.W)
         epsabs = 1e-3
         epsrel = 1e-3
-        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y,2)
+        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y, 2)
         for j in range(1000): # force 10 iterations,
             L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
             Omega_tilde = numpy.eye(self.K)
+
             numpy.fill_diagonal(Omega_tilde, (L + numpy.sqrt(L**2 + 4*rho))/(2*rho))
             Omega = Q.dot(Omega_tilde).dot(Q.T)
             Z_prev = Z.copy()
             Z = self.softthreshold(Omega + U, self.lambd/rho)
             U = U + Omega - Z
-            
+
             dualresid = numpy.linalg.norm(self.rho * (Z - Z_prev), 2)
             primalresid = numpy.linalg.norm(Omega - Z, 2)
             epspri = numpy.sqrt(self.d) * epsabs + epsrel * numpy.max([numpy.linalg.norm(Omega, 2), numpy.linalg.norm(Z, 2), 0])
@@ -113,9 +114,8 @@ class pMSSL:
             if (dualresid < epsdual) and (primalresid < epspri):
                 break
 
+        return Z
 
-        #if not self.quite:
-        return Omega
 
    # Lets save the proximal descent update
     def _w_update(self):
@@ -171,7 +171,7 @@ class pMSSL:
             prevTheta = Theta.copy()
             C = Xy + rho * (Z - U)
             t0 = time.time()
-            Theta = solve_sylvester(XX + rho * numpy.eye(XX.shape[0]), self.Omega, C)
+            Theta = solve_sylvester(XX + rho * numpy.eye(XX.shape[0]), 2*self.Omega, C)
             tsum += time.time() - t0
             Z_prev = Z.copy()
             Z = self.softthreshold(Theta + U, self.gamma/rho)
@@ -193,87 +193,62 @@ class pMSSL:
     def predict(self, X):
         return X.dot(self.W)
 
-def test1():
-    import time
-    t0 = time.time()
-    n = 10000
-    ntrain = int(n*0.80)
-    d = 100
-    k = 9
-    W = numpy.random.normal(size=(d, k))
-    W[:, :20] += numpy.random.normal(0, 10, size=(d, 1))
-    W[:, 20:100] += numpy.random.normal(0, 10, size=(d, 1))
-    print W[:5,:5]
-    X = numpy.random.uniform(-1, 1, size=(n, d))
-    y = X.dot(W)
-    mssl = pMSSL(max_epochs=200, quite=True)
-    MSE = numpy.zeros((5,5))
-    for j, g in enumerate(10**numpy.linspace(-1, 2, 4)):
-        for i, l in enumerate(10**numpy.linspace(-1, 2, 4)):
-            try:
-                mssl.fit(X[:70], y[:70], rho=1., gamma=g, lambd=l)
-            except:
-                print "Pass -- Lamdba %f, Gamma %f" % (l, g)
-                continue
-            yhat = mssl.predict(X[70:])
-            mse = numpy.mean((yhat - y[70:])**2)
-            MSE[i, j] = mse
-            print mse
-            try:
-                if mse < bestmse:
-                    bestmssl = mssl
-            except NameError:
-                bestmssl = mssl
-    print MSE
-    pyplot.subplot(2,1,1)
-    pyplot.imshow(MSE, interpolation="none")
-    pyplot.subplot(2,1,2)
-    pyplot.imshow(bestmssl.Omega, interpolation="none", cmap="Reds")
-    pyplot.savefig("test2fig.pdf")
-    print "Time to run:", time.time() - t0
 
+def mse(y1, y2):
+    return numpy.mean((y1 - y2)**2)
 
 def test2():
     numpy.random.seed(1)
     n = 200
-    d = 20
-    k = 10
-    l = 1
-    g = 1
-    train = 50
+    d = 50
+    k = 15
+    l = 1e2
+    g = 0.0383814370407
+    train = 70
     tt = time.time()
     W = numpy.random.normal(size=(d, k))
-    W[:, :4] += numpy.random.normal(0, 10, size=(d, 1))
-    W[:, 5:10] += numpy.random.normal(0, 10, size=(d, 1))
-    #print W[:5,:15]
+
+    rows1 = numpy.random.choice(range(d), 5)
+    rows2 = numpy.random.choice(range(d), 6)
+
+    W[rows1, :4] += numpy.random.normal(0, 2, size=(len(rows1), 1))
+    W[rows2, 5:10] += numpy.random.normal(0, 2, size=(len(rows2), 1))
+
     X = numpy.random.uniform(-1, 1, size=(n, d))
-    y = X.dot(W)
-    mssl = pMSSL(max_epochs=50, quite=True, gamma=g, lambd=l)
-    mssl.fit(X[:train], y[:train], rho=1e-2,  wadmm=True)
-    yhat = mssl.predict(X[train:])
-    print mssl.W[:10, 0]
-    print W[:10, 0]
-    print mssl.Omega
+    X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))
+    y = X.dot(W) + numpy.random.normal(0, 0.1, size=(n, k))
+    Z = []
+    lspace = numpy.linspace(0,200,10)
+    for l in lspace:
+        mssl = pMSSL(max_epochs=50, quite=True, gamma=g, lambd=l)
+        mssl.fit(X[:train], y[:train], rho=1e-2,  wadmm=True)
+        yhat = mssl.predict(X[train:])
+        Z.append(numpy.sum(mssl.Omega == 0))
+        print Z[-1]
 
-    from scipy.stats import spearmanr
-    from sklearn.linear_model import Lasso
-    print "MSSL: Spearman", numpy.mean([spearmanr(yhat[:,i], y[train:,i])[0] for i in range(k)])
+    pyplot.plot(lspace, Z)
+    pyplot.show()
 
-    m = Lasso(alpha=g, max_iter=20000)
+    from scipy.stats import spearmanr, pearsonr
+    from sklearn.linear_model import Lasso, LassoCV
+    print "MSSL: Spearman", spearmanr(yhat[:,0], y[train:,0])[0]
+    print "MSSL: MSE", mse(yhat[:,0], y[train:,0])
+
+    m = LassoCV()
     m.fit(X[:train, :], y[:train, 0])
     yhat = m.predict(X[train:, :])
     print m.coef_.T[:10]
-    print "MTLasso: Spearman ", spearmanr(yhat, y[train:, 0])[0]
+    print "Lasso: Spearman ", pearsonr(yhat, y[train:, 0])[0]
+    print "Lasso: MSE", mse(yhat, y[train:, 0])
 
-    #print mssl.W[:5, :15]
-    #print mssl.Omega
-    pyplot.imshow(numpy.linalg.inv(mssl.Omega),interpolation="none", cmap="Reds")
-    #pyplot.imshow(mssl.Omega, interpolation="none", cmap="Reds")
+    pyplot.subplot(1,2,1)
+    pyplot.imshow(numpy.linalg.inv(mssl.Omega), interpolation="none", cmap="Reds")
+    pyplot.subplot(1,2,2)
+    pyplot.imshow(mssl.W, interpolation="none", cmap="Reds")
+
     pyplot.title("Lamdba %f, Gamma %f" % (l, g))
     pyplot.show()
-    #pyplot.savefig("test1.pdf")
-    #print "Time to train: ", time.time() - tt
-    #return mssl
+
 
 def climatetest():
     import time
@@ -312,6 +287,6 @@ def climatetest():
     #pyplot.show()
 
 if __name__ == "__main__":
-    ms = test2()
+    ms = test1()
     #climatetest()
 
