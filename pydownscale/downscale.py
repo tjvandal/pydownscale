@@ -21,6 +21,7 @@ class DownscaleModel:
 
     def _split_dataset(self, training_size, vars=None):
         X = self.data.get_X(vars=vars)
+        X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))  # normalize X so the columns sum to 1
         if self.season:
             X = X[self.seasonidxs, :]
 
