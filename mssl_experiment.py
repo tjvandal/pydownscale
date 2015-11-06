@@ -30,6 +30,7 @@ print "Data Loaded: %d seconds" % (time.time() - t0)
 data = DownscaleData(cmip5, monthlycpc)
 data.normalize_monthly()
 
+
 # print "Data Normalized: %d" % (time.time() - t0)
 X = data.get_X()
 y, _ = data.get_y()
@@ -43,13 +44,19 @@ spearmans = []
 errs = []
 params = []
 mssl_results = []
-f = open("mssl-experiment-results.txt", "w")
-for lambd in [0, 1e0, 1e1, 1e2][:1]:
-    for gamma in [1e0, 1e1/2, 1e1]:
+
+for lambd in numpy.linspace(0, 1, 3)[1:]:
+    for gamma in numpy.linspace(0, 3, 4):
         model = pMSSL(lambd=lambd, gamma=gamma, max_epochs=100)
         dmodel = DownscaleModel(data, model, season=season)
-        dmodel.train()
-        results = dmodel.get_results()
+        try:
+            dmodel.train()
+            results = dmodel.get_results()
+        except Exception as err:
+            print err
+            continue
+        
+        results = [dict(r, **{'gamma': gamma, "lambda": lambd}) for r in results]
         spear = pandas.DataFrame(results).spearman.mean()
         rmse = pandas.DataFrame(results).rmse.mean()
         spearmans.append(spear)
@@ -82,4 +89,5 @@ model2 = DownscaleModel(data, mlasso, season=season)
 model2.train()
 results2 = model2.get_results()
 print "MLLasso", pandas.DataFrame(results2).spearman.mean()
-pandas.DataFrame(results2).to_csv("mtlasso-results.csv")
+resdf = pandas.DataFrame(results2)
+resdf.to_csv("mtlasso-results.csv")

@@ -42,15 +42,12 @@ class DownscaleModel:
         self.yhat_train = self.model.predict(self.X_train)
         self.yhat_test = self.model.predict(self.X_test)
 
-    def get_mse(self, test_set=True):
-        if test_set:
-            return numpy.mean((self.y_test - self.yhat_test) ** 2)
-        else:
-            return numpy.mean((self.y_train - self.yhat_train) ** 2)
+    def get_mse(self, y, yhat):
+        return numpy.mean((y - yhat) ** 2)
 
     def _stats(self, y, yhat, test_set=True):
         res = {}
-        res['rmse'] = self.get_mse(test_set)**(0.5)
+        res['rmse'] = self.get_mse(y, yhat)**(0.5)
         res['pearson'] = pearsonr(y, yhat)[0]
         res['spearman'] = spearmanr(y, yhat)[0]
         res['kendaltau'] = kendalltau(y, yhat)[0]
