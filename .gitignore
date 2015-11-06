@@ -1,1 +1,4 @@
 *.pyc
+*config.py
+*.pdf
+*.csv
