@@ -16,7 +16,7 @@ class pMSSL:
         self.quite = quite
         self.gamma = gamma
 
-    def fit(self,X, y, rho=1e-4, wadmm=True):
+    def fit(self,X, y, rho=1e-4, wadmm=True, epsomega=1e-3 ,epsw=1e-3):
         self.X = X
         self.y = y
         self.rho = rho
@@ -25,14 +25,16 @@ class pMSSL:
         self.d = self.X.shape[1]
         self.Omega = numpy.eye(self.K)
         self.W = numpy.zeros(shape=(self.d, self.K))
-
+        prev_omega = self.Omega.copy()
+        prev_w = self.W.copy()
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
         costdiff = 10
         omegatime = 0.
         wtime = 0.
-        t = 0
         costs = []
-        while (costdiff > 1e-3) and (t < self.max_epochs):
+        for t in range(self.max_epochs):
+            prev_omega = self.Omega.copy()
+            prev_w = self.W.copy()
             tw = time.time()
             if wadmm:
                 self.W = self._w_update_admm(rho=self.rho)
@@ -42,18 +44,16 @@ class pMSSL:
             to = time.time()
             self.Omega = self._omega_update(self.Omega, rho=self.rho)
             omegatime += (time.time() - to)
-            curr_cost = self.cost(self.W, self.Omega)
-            costs.append(curr_cost)
-            if t == 0:
-                costdiff = curr_cost
-                prevcost = curr_cost
-            else:
-                costdiff = numpy.abs(prevcost - curr_cost)
-                prevcost = curr_cost
-            t += 1
-            if not self.quite:
-                print "iteration %i, costdiff: %f, cost: %0.2f, omega zeros: %i" % (t, costdiff, curr_cost, numpy.sum(self.Omega == 0))
+            omega_diff = numpy.linalg.norm(self.Omega - prev_omega, 2)
+            w_diff = numpy.linalg.norm(prev_w - self.W, 2)
 
+            if (omega_diff < epsomega) and (w_diff < epsw):
+                break
+
+            if not self.quite:
+                print "iteration %i, w zeros: %i, omega zeros: %i" % (t, numpy.sum(self.W == 0), numpy.sum(self.Omega == 0))
+
+        print "Converged in %i" % (t)
         #print "Amount of time to train Omega: %f" % omegatime
         #print "Amount of time to train W:     %f" % wtime
 
@@ -87,13 +87,12 @@ class pMSSL:
         Z = numpy.zeros(shape=(self.K, self.K))
         U = numpy.zeros(shape=(self.K, self.K))
         j = 0
-        dualresid = 10e6
         resid = []
         S = self.W.T.dot(self.W)
         epsabs = 1e-3
-        epsrel = 1e-3
+        epsrel = 1e-5
         epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y, 2)
-        for j in range(1000): # force 10 iterations,
+        for j in range(1000):
             L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
             Omega_tilde = numpy.eye(self.K)
 
@@ -119,7 +118,7 @@ class pMSSL:
 
    # Lets save the proximal descent update
     def _w_update(self):
-        costdiff = 10e6
+        costdiff = 1e-6
         W = self.W
         j = 0
         t0 = time.time()
@@ -178,7 +177,7 @@ class pMSSL:
             U = U + Theta - Z
             if (j % 100 == 0) and (not self.quite):
                 print j, numpy.linalg.norm(prevTheta - Theta, 2)
-            rho = min(rho*1.1, maxrho)
+            #rho = min(rho*1.1, maxrho)
 
             dualresid = numpy.linalg.norm(self.rho*(Z - Z_prev), 2)
             primalresid = numpy.linalg.norm(Theta - Z, 2)
