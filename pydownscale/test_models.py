@@ -8,8 +8,8 @@ import numpy
 from sklearn.linear_model import LinearRegression, LassoCV, MultiTaskLassoCV
 from rMSSL import pMSSL
 from data import DownscaleData, read_nc_files, assert_bounds
-from downscale import DownscaleModel
 import config as config
+from downscale import DownscaleModel
 from stepwise_regression import BackwardStepwiseRegression
 from qrnn import QRNNCV, QRNN
 from bma import BMA
@@ -37,13 +37,13 @@ def stepwiseregression_test(data, loc, season):
     return pandas.DataFrame(dmodel.get_results())
 
 def lasso_test(data, loc, season):
-    model = LassoCV(max_iter=2000)
+    model = LassoCV(max_iter=2000, normalize=True)
     dmodel = DownscaleModel(data, model, season=season)
     dmodel.train(location={'lat': loc[0], 'lon': loc[1]})
     return pandas.DataFrame(dmodel.get_results())
 
 def mtlasso_test(data, loc, season):
-    model = MultiTaskLassoCV(max_iter=2000)
+    model = MultiTaskLassoCV(max_iter=2000, normalize=True)
     dmodel = DownscaleModel(data, model, season=season)
     dmodel.train()
     return pandas.DataFrame(dmodel.get_results())
@@ -75,6 +75,9 @@ def qrnn_test(data, loc, season):
     return pandas.DataFrame(dmodel.get_results())
 
 if __name__ == "__main__":
+    season = 'MAM'
+
+    '''
     ncep_dir = config.ncep_dir
     cpc_dir = config.cpc_dir
     season = 'MAM'
@@ -93,12 +96,15 @@ if __name__ == "__main__":
 
     data = DownscaleData(ncep, monthlycpc)
     data.normalize_monthly()
+    '''
+    import pickle
+    data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_120.pkl')) 
     loc = data.location_pairs('lat', 'lon')[0]
     #print "Stepwise", stepwiseregression_test(data, loc, season)
     #print "Lasso", lasso_test(data, loc, season)
     #print "MTlasso", mtlasso_test(data, loc, season)
-    #print "Mssl", mssl_test(data, loc, season)
+    print "Mssl", mssl_test(data, loc, season)
     #print "PCASVR", pcasvr_test(data, loc, season)
     #print "BMA", bma_test(data, loc, season)
-    print "QRNN:", qrnn_test(data, loc, season)
+    #print "QRNN:", qrnn_test(data, loc, season)
 
