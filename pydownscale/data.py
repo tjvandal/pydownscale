@@ -131,7 +131,7 @@ def get_ncep_file_paths(basedir):
             if '.nc' in f:
                 files.append(os.path.join(dirpath, f))
 
-    return files
+    return sorted(files)
 
 
 def read_nc_files(dir):
@@ -197,6 +197,9 @@ def read_config_data_monthly():
         print v
         d = xray.open_mfdataset(fv)
         d = assert_bounds(d, config.lowres_bounds)
+        if 'level' in d.dims:
+            d = d.loc[dict(level=config.nceplevels)]
+            
         d.load()
         d = d.resample('MS', 'time', how='mean')
         lowres.append(d)
@@ -213,7 +216,8 @@ def read_config_data_monthly():
 
 if __name__ == "__main__":
 
-    read_config_data_monthly()
+    D = read_config_data_monthly()
+    print "Shape of X:", d.get_X()
     '''
     import config
     ncep_dir = config.ncep_dir
