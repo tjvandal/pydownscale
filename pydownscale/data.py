@@ -198,8 +198,12 @@ def read_config_data_monthly():
         d = xray.open_mfdataset(fv)
         d = assert_bounds(d, config.lowres_bounds)
         if 'level' in d.dims:
-            d = d.loc[dict(level=config.nceplevels)]
-            
+	    levels = [l for l in config.nceplevels if l in d.level.values]
+            print levels, d.level
+	    if len(levels) > 0:
+	    	d = d.loc[dict(level=levels)]
+            else:
+		continue
         d.load()
         d = d.resample('MS', 'time', how='mean')
         lowres.append(d)
@@ -215,9 +219,16 @@ def read_config_data_monthly():
 
 
 if __name__ == "__main__":
-
+    import config
+    import pickle
+    
     D = read_config_data_monthly()
-    print "Shape of X:", d.get_X()
+    X = D.get_X()
+    print "Shape of X:", X.shape
+    fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
+    f = os.path.join(config.save_dir, "DownscaleData", fname)
+    pickle.dump(D, open(fname, 'w'))
+
     '''
     import config
     ncep_dir = config.ncep_dir

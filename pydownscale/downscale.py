@@ -5,7 +5,7 @@ import config
 import pandas
 
 class DownscaleModel:
-    def __init__(self, data, model, training_size=config.train_percent, season=None, xvars=None):
+    def __init__(self, data, model, training_size=config.train_percent, season=None):
         if data.__class__.__name__ != 'DownscaleData':
             raise TypeError("Data must be of type downscale data.")
         if not hasattr(model, "fit") or not hasattr(model, "predict"):
@@ -15,12 +15,12 @@ class DownscaleModel:
         self.model = model
         self.season = season
         if self.season:
-            self.seasonidxs = numpy.where(self.data.cmip['time.season'] == self.season)[0]
+            self.seasonidxs = numpy.where(self.data.ncep[0]['time.season'] == self.season)[0]
 
-        self._split_dataset(training_size, vars=xvars)
+        self._split_dataset(training_size)
 
-    def _split_dataset(self, training_size, vars=None):
-        X = self.data.get_X(vars=vars)
+    def _split_dataset(self, training_size):
+        X = self.data.get_X()
         X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))  # normalize X so the columns sum to 1
         if self.season:
             X = X[self.seasonidxs, :]
