@@ -9,6 +9,15 @@ import sys
 from scipy.linalg import solve_sylvester
 import time
 
+def center_data(X, y):
+    X_mean = X.mean(axis=0)
+    X -= X_mean
+    X_frob = numpy.diag(1/numpy.sqrt(sum(X**2)))
+    X = X.dot(X_frob)
+    y_mean = y.mean(axis=0)
+    y -= y_mean
+    return X, y, X_mean, y_mean, X_frob
+
 class pMSSL:
     def __init__(self, max_epochs=1000, quite=True, lambd=1e-4, gamma=1e-4):
         self.lambd = float(lambd)
@@ -16,13 +25,13 @@ class pMSSL:
         self.quite = quite
         self.gamma = gamma
 
-    def fit(self,X, y, rho=1e-4, wadmm=True, epsomega=1e-3 ,epsw=1e-3):
-        self.X = X
-        self.y = y
+    def fit(self, X, y, rho=1e-4, wadmm=True, epsomega=1e-3 ,epsw=1e-3):
+        X, y, self.X_mean, self.y_mean, self.X_frob = center_data(X, y)
+
         self.rho = rho
-        self.K = self.y.shape[1]
-        self.n = self.y.shape[0]
-        self.d = self.X.shape[1]
+        self.K = y.shape[1]
+        self.n = y.shape[0]
+        self.d = X.shape[1]
         self.Omega = numpy.eye(self.K)
         self.W = numpy.zeros(shape=(self.d, self.K))
         prev_omega = self.Omega.copy()
@@ -37,12 +46,12 @@ class pMSSL:
             prev_w = self.W.copy()
             tw = time.time()
             if wadmm:
-                self.W = self._w_update_admm(rho=self.rho)
+                self.W = self._w_update_admm(X, y, rho=self.rho)
             else:
-                self.W = self._w_update()
+                self.W = self._w_update(X, y)
             wtime += (time.time() - tw)
             to = time.time()
-            self.Omega = self._omega_update(self.Omega, rho=self.rho)
+            self.Omega = self._omega_update(y, self.Omega, rho=self.rho)
             omegatime += (time.time() - to)
             omega_diff = numpy.linalg.norm(self.Omega - prev_omega, 2)
             w_diff = numpy.linalg.norm(prev_w - self.W, 2)
@@ -57,8 +66,8 @@ class pMSSL:
         #print "Amount of time to train Omega: %f" % omegatime
         #print "Amount of time to train W:     %f" % wtime
 
-    def cost(self, W, Omega):
-        cost, _ = self._w_cost(W)
+    def cost(self, X, W, Omega):
+        cost, _ = self._w_cost(X, W)
         if numpy.sum(Omega) != 0:
             cost -= self.K/2.*numpy.log(numpy.linalg.det(Omega))
         cost += self.lambd * numpy.linalg.norm(Omega, 1)
@@ -80,7 +89,7 @@ class pMSSL:
             [X > thres, numpy.abs(X) <= thres, X < -thres], 
             [lambda X: X - thres, 0, lambda X: X+thres])
 
-    def _omega_update(self, Omega, rho):
+    def _omega_update(self, y, Omega, rho):
         if self.lambd == 0:
             return numpy.zeros(shape=Omega.shape)
         maxrho = 10
@@ -91,7 +100,7 @@ class pMSSL:
         S = self.W.T.dot(self.W)
         epsabs = 1e-3
         epsrel = 1e-5
-        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y, 2)
+        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(y, 2)
         for j in range(1000):
             L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
             Omega_tilde = numpy.eye(self.K)
@@ -117,16 +126,16 @@ class pMSSL:
 
 
    # Lets save the proximal descent update
-    def _w_update(self):
+    def _w_update(self, X, y):
         costdiff = 1e-6
         W = self.W
         j = 0
         t0 = time.time()
-        tk = 1/(2*numpy.linalg.norm(self.X.T.dot(self.X), 1)) # tk exits in (0, 1/||X.T*X||)
-        XX = self.X.T.dot(self.X)
-        XY = self.X.T.dot(self.y)
+        tk = 1/(2*numpy.linalg.norm(X.T.dot(X), 1)) # tk exits in (0, 1/||X.T*X||)
+        XX = X.T.dot(X)
+        XY = X.T.dot(y)
         while costdiff > 1e-6:
-            cost, gmat = self._w_cost(W, XX=XX, XY=XY)
+            cost, gmat = self._w_cost(X, W, XX=XX, XY=XY)
             W = self.shrinkage_threshold(W - tk*gmat, alpha=self.gamma*tk)
             if j == 0:
                 costdiff = numpy.abs(cost)
@@ -141,30 +150,30 @@ class pMSSL:
         return W
 
     # Lets parallelize this
-    def _w_cost(self, W, XX=None, XY=None):
-        XW = self.X.dot(W)
+    def _w_cost(self, X, y, W,  XX=None, XY=None):
+        XW = X.dot(W)
         if XX is None:
-            XX = self.X.T.dot(self.X)
+            XX = X.T.dot(X)
         if XY is None:
-            XY = self.X.T.dot(self.y)
-        f = 0.5*numpy.linalg.norm(self.y - XW, 2)
-        #f = (self.y-XW).T.dot((self.y-XW)) / (2*len(self.y))
+            XY = X.T.dot(y)
+        f = 0.5*numpy.linalg.norm(y - XW, 2)
+        #f = (y-XW).T.dot((y-XW)) / (2*len(y))
         f += self.lambd*numpy.trace(W.dot(self.Omega).dot(W.T))
-        gmat = (XX.dot(W) - XY)/len(self.y)  # the gradients
+        gmat = (XX.dot(W) - XY)/len(y)  # the gradients
         gmat += 2*W.dot(self.Omega) # *self.lambd
         return numpy.sum(f), gmat
 
-    def _w_update_admm(self, rho):
+    def _w_update_admm(self, X, y, rho):
         maxrho = 10
         Z = numpy.zeros(shape=(self.d, self.K))
         U = numpy.zeros(shape=(self.d, self.K))
         j = 0
-        XX = self.X.T.dot(self.X)  # dxd
-        Xy = self.X.T.dot(self.y)  # dxk
+        XX = X.T.dot(X)  # dxd
+        Xy = X.T.dot(y)  # dxk
         Theta = self.W.copy()      # dxk
         epsabs = 1e-3
         epsrel = 1e-3
-        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(self.y,2)
+        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(y,2)
         tsum = 0.
         for j in range(5000):
             prevTheta = Theta.copy()
@@ -190,7 +199,9 @@ class pMSSL:
         return Z
 
     def predict(self, X):
-        return X.dot(self.W)
+        X -= self.X_mean
+        X = X.dot(self.X_frob)
+        return X.dot(self.W) + self.y_mean
 
 
 def mse(y1, y2):
@@ -199,7 +210,7 @@ def mse(y1, y2):
 def test2():
     numpy.random.seed(1)
     n = 200
-    d = 50
+    d = 20
     k = 15
     l = 1e2
     g = 0.0383814370407
@@ -213,11 +224,16 @@ def test2():
     W[rows1, :4] += numpy.random.normal(0, 2, size=(len(rows1), 1))
     W[rows2, 5:10] += numpy.random.normal(0, 2, size=(len(rows2), 1))
 
+    
     X = numpy.random.uniform(-1, 1, size=(n, d))
-    X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))
+    #X_prev = X.copy()
+    #X -= X.mean(axis=0)
+    #X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))
     y = X.dot(W) + numpy.random.normal(0, 0.1, size=(n, k))
+
     Z = []
-    lspace = numpy.linspace(0,200,10)
+    #lspace = numpy.linspace(0,10,3)
+    lspace = [0.1]
     for l in lspace:
         mssl = pMSSL(max_epochs=50, quite=True, gamma=g, lambd=l)
         mssl.fit(X[:train], y[:train], rho=1e-2,  wadmm=True)
@@ -225,15 +241,15 @@ def test2():
         Z.append(numpy.sum(mssl.Omega == 0))
         print Z[-1]
 
-    pyplot.plot(lspace, Z)
-    pyplot.show()
+    #pyplot.plot(lspace, Z)
+    #pyplot.show() 
 
     from scipy.stats import spearmanr, pearsonr
     from sklearn.linear_model import Lasso, LassoCV
     print "MSSL: Spearman", spearmanr(yhat[:,0], y[train:,0])[0]
     print "MSSL: MSE", mse(yhat[:,0], y[train:,0])
 
-    m = LassoCV()
+    m = LassoCV(normalize=True)
     m.fit(X[:train, :], y[:train, 0])
     yhat = m.predict(X[train:, :])
     print m.coef_.T[:10]
@@ -286,6 +302,6 @@ def climatetest():
     #pyplot.show()
 
 if __name__ == "__main__":
-    ms = test1()
+    ms = test2()
     #climatetest()
 
