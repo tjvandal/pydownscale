@@ -3,9 +3,10 @@ import numpy
 
 class BackwardStepwiseRegression():
     def __init__(self):
-        self.linearmodel = LinearRegression(fit_intercept=True)
+        self.linearmodel = LinearRegression(fit_intercept=True, normalize=True)
 
     def fit(self, X, y):
+
         variables = range(X.shape[1])
         self.linearmodel.fit(X, y)
         bestbic = self.BIC(X, y)
