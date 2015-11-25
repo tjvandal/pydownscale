@@ -77,7 +77,6 @@ class DownscaleData:
             x.append(df.unstack(levels).values)
 
         x = numpy.column_stack(x)
-        print x.shape
         return x
 
 
@@ -90,8 +89,8 @@ class DownscaleData:
             y = y.unstack(levels)
             location = y.columns.to_series()
             y = y.values
-
-        return y, location
+            cols = y[0,:] != -999.
+        return y[:, cols], location[cols]
 
     def location_pairs(self, dim1, dim2):
         Y = self.observations.to_array()
@@ -121,7 +120,7 @@ class DownscaleData:
         elif len(Y.coords[dim2].values) == 1:
             t0values = t0values[:, numpy.newaxis]
 
-        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] != -999.]
+        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan)]
         return pairs
 
 def get_ncep_file_paths(basedir):
@@ -221,13 +220,13 @@ def read_config_data_monthly():
 if __name__ == "__main__":
     import config
     import pickle
-    
+
     D = read_config_data_monthly()
     X = D.get_X()
     print "Shape of X:", X.shape
     fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)
-    pickle.dump(D, open(fname, 'w'))
+    pickle.dump(D, open(f, 'w'))
 
     '''
     import config

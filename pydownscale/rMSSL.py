@@ -32,14 +32,18 @@ class pMSSL:
         self.K = y.shape[1]
         self.n = y.shape[0]
         self.d = X.shape[1]
-        self.Omega = numpy.eye(self.K)
-        self.W = numpy.zeros(shape=(self.d, self.K))
+        if not hasattr(self, 'Omega'):
+            self.Omega = numpy.eye(self.K)
+        if not hasattr(self, 'W'):
+            self.W = numpy.zeros(shape=(self.d, self.K))
+
         prev_omega = self.Omega.copy()
         prev_w = self.W.copy()
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
         costdiff = 10
         omegatime = 0.
         wtime = 0.
+        start_time = time.time()
         costs = []
         for t in range(self.max_epochs):
             prev_omega = self.Omega.copy()
@@ -61,6 +65,10 @@ class pMSSL:
 
             if not self.quite:
                 print "iteration %i, w zeros: %i, omega zeros: %i" % (t, numpy.sum(self.W == 0), numpy.sum(self.Omega == 0))
+		print "Omega Time: %f, W time: %f" % (omegatime,wtime)
+            # 24 Hours is almost up
+            if (time.time() - start_time) > (12. * 60 * 60):
+                return
 
         print "Converged in %i" % (t)
         #print "Amount of time to train Omega: %f" % omegatime
@@ -99,7 +107,7 @@ class pMSSL:
         resid = []
         S = self.W.T.dot(self.W)
         epsabs = 1e-3
-        epsrel = 1e-5
+        epsrel = 1e-3
         epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(y, 2)
         for j in range(1000):
             L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
@@ -175,12 +183,13 @@ class pMSSL:
         epsrel = 1e-3
         epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(y,2)
         tsum = 0.
-        for j in range(5000):
+        for j in range(1000):
             prevTheta = Theta.copy()
             C = Xy + rho * (Z - U)
             t0 = time.time()
             Theta = solve_sylvester(XX + rho * numpy.eye(XX.shape[0]), 2*self.Omega, C)
-            tsum += time.time() - t0
+            #print "Time to solve sylvester", time.time() - t0
+	    tsum += time.time() - t0
             Z_prev = Z.copy()
             Z = self.softthreshold(Theta + U, self.gamma/rho)
             U = U + Theta - Z

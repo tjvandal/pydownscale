@@ -3,9 +3,11 @@ import numpy
 from scipy.stats import pearsonr, spearmanr, kendalltau
 import config
 import pandas
+import pickle 
+import time
 
 class DownscaleModel:
-    def __init__(self, data, model, training_size=config.train_percent, season=None):
+    def __init__(self, data, model, training_size=config.train_percent, season=None, feature_columns=None):
         if data.__class__.__name__ != 'DownscaleData':
             raise TypeError("Data must be of type downscale data.")
         if not hasattr(model, "fit") or not hasattr(model, "predict"):
@@ -17,10 +19,14 @@ class DownscaleModel:
         if self.season:
             self.seasonidxs = numpy.where(self.data.ncep[0]['time.season'] == self.season)[0]
 
-        self._split_dataset(training_size)
+        self._split_dataset(training_size, feature_columns=feature_columns)
 
-    def _split_dataset(self, training_size):
-        X = self.data.get_X()
+    def _split_dataset(self, training_size, feature_columns=None):
+        if feature_columns is not None:
+            X = self.data.get_X()[:, feature_columns]
+        else:
+            X = self.data.get_X()
+
         X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))  # normalize X so the columns sum to 1
         if self.season:
             X = X[self.seasonidxs, :]
@@ -31,16 +37,23 @@ class DownscaleModel:
 
     # include quantile mapping ability
     def train(self, location=None):
+        start_time = time.time()
         y, self.location = self.data.get_y(location=location)
-
+        t = self.data.observations['time'].values
         if self.season:
             y = y[self.seasonidxs]
+            t = t[self.seasonidxs]
 
         self.y_train = y[:self.numtrain]
         self.y_test = y[self.numtrain:]
         self.model.fit(self.X_train, self.y_train)
         self.yhat_train = self.model.predict(self.X_train)
         self.yhat_test = self.model.predict(self.X_test)
+        self.t_test = t[self.numtrain:]
+        if (time.time() - start_time) > 12*60*60:
+            f = "%s_%s.pkl" % (self.model.__class__.__name__, self.season)
+            pickle.dump(self.model, open(f, 'w'))
+            raise TimeoutError("%s %s did not complete training. Continue with file %s" % (self.model.__class__.__name__, self.season, f))
 
     def get_mse(self, y, yhat):
         return numpy.mean((y - yhat) ** 2)
@@ -71,6 +84,9 @@ class DownscaleModel:
         results = []
         if isinstance(self.location, dict):
             self.location.update(self._stats(y, yhat, test_set))
+            self.location['y'] = y
+            self.location['yhat'] = yhat
+            self.location['time'] = self.t_test
             results.append(self.location)
 
         elif isinstance(self.location, pandas.Series):
@@ -79,7 +95,9 @@ class DownscaleModel:
                 r = row[1]
                 res = {n: r[i] for i, n in enumerate(names)}
                 res.update(self._stats(y[:, j], yhat[:, j], test_set=test_set))
-
+                res['y'] = y[:, j]
+                res['yhat'] = yhat[:, j]
+                res['time'] = self.t_test
 
                 if hasattr(self.model, "alpha_"):
                     res["lasso_alpha"] = numpy.mean(self.model.alpha_)
