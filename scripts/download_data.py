@@ -81,11 +81,11 @@ def get_ncep_file_paths():
 
 
 if __name__ == "__main__":
-    #download_ncep_daily()
+    download_ncep_daily()
 
-    files = get_ncep_file_paths()
-    print files
-    import xray
-    d = xray.open_mfdataset(files)
-    print d['rhum'].values
+    #files = get_ncep_file_paths()
+    #print files
+    #import xray
+    #d = xray.open_mfdataset(files)
+    #print d['rhum'].values
 
