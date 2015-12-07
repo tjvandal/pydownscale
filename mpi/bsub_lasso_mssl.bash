@@ -1,9 +1,9 @@
 #!/bin/sh
-#BSUB -J lineardownscaling
-#BSUB -o downscale_results
-#BSUB -e error_file
-#BSUB -n 327
-#BSUB -q ser-par-10g
+#BSUB -J lmssl_downscaling_30
+#BSUB -o lmssl_results_30
+#BSUB -e error_lmssl_downscaling_30
+#BSUB -n 400
+#BSUB -q ser-par-10g-3
 #BSUB -cwd /home/vandal.t/repos/pydownscale/mpi
 ######## THIS IS A TEMPLATE FILE FOR TCP ENABLED MPI RUNS ON THE DISCOVERY CLUSTER ########
 #### #BSUB -n has a value equal to the given value for the -np option ####
@@ -19,8 +19,8 @@ work=/home/vandal.t/repos/pydownscale/mpi
 ########DO NOT EDIT ANYTHING BELOW THIS LINE#########
 #####################################################
 cd $work
-tempfile1=hostlistrun
-tempfile2=hostlist-tcp
+tempfile1=hostlistrun2
+tempfile2=hostlist-tcp2
 echo $LSB_MCPU_HOSTS > $tempfile1
 declare -a hosts
 read -a hosts < ${tempfile1}
@@ -40,7 +40,7 @@ done
 ###### MAKE SURE THAT THE "#BSUB -n" is equal to the "-np" number below. IN this example it is 8.
 
 # source /shared/apps/sage/sage-5.12/spkg/bin/sage-env
-mpirun -np 327 -prot -TCP -lsf /home/vandal.t/repos/pydownscale/mpi_linearregression.py
+mpirun -np 100 -prot -TCP -lsf /home/vandal.t/repos/pydownscale/mpi_lasso_mssl.py
 # any clean up tasks and file migration code is entered below
 
 #####################################################

@@ -68,13 +68,10 @@ for seas in seasons:
 		res = dmodel.get_results()
 		for r in res:
 			r['time_to_execute'] = time.time() - t0
+			r['alpha'] = alpha
 			results.append(r)
 
 if rank == 0:
-	print results
-	#results = [item for l in results for item in l]   ## condense lists of lists
-	
-	print results
 	data = pandas.DataFrame(results)
 	timestr = time.strftime("%Y%m%d-%H%M%S")
 	data.to_csv("mtl_downscale_results_%s.csv" % timestr, index=False)

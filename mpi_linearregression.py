@@ -11,60 +11,61 @@ from scipy.stats import pearsonr, spearmanr, kendalltau
 import os
 import time
 import numpy
-from sklearn.linear_model import LinearRegression, LassoCV
+from sklearn.linear_model import LinearRegression, LassoCV, MultiTaskLassoCV
 from sklearn.feature_selection import RFE
 from pydownscale.data import DownscaleData, read_nc_files
 from pydownscale.downscale import DownscaleModel
+from pydownscale.stepwise_regression import BackwardStepwiseRegression
+from pydownscale.pcasvr import PCASVR
+from pydownscale.bma import BMA
 import pydownscale.config as config
 import argparse
 import pandas
+import pickle
 
-ncep_dir = config.ncep_dir
-cpc_dir = config.cpc_dir
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-# climate model data, monthly
-ncep = read_nc_files(ncep_dir)
-ncep.load()
-ncep = assert_bounds(ncep, config.lowres_bounds)
-ncep = ncep.resample('MS', 'time', how='mean')   ## try to not resample
-
-# daily data to monthly
-cpc = read_nc_files(cpc_dir)
-cpc.load()
-cpc = assert_bounds(cpc, config.highres_bounds)
-monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
-
-data = DownscaleData(ncep, monthlycpc)
-data.normalize_monthly()
+data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_3150.pkl')) 
 
 if rank == 0:
    ## lets split up our y's
    pairs = data.location_pairs('lat', 'lon')
-   pairs = numpy.split(pairs, size)   ## lets chunk this data up into size parts
+   pairs = numpy.array_split(numpy.array(pairs), size)   ## lets chunk this data up into size parts
 else:
    pairs = None
 
 pairs = comm.scatter(pairs, root=0)
 results = []
-models = [LassoCV(alphas=[1, 10, 100])]
+models = [
+          LinearRegression(normalize=True),
+          LassoCV(normalize=True),
+          BackwardStepwiseRegression(),
+          PCASVR(),
+          BMA()
+          ]
+
 seasons = ['DJF', 'MAM', 'JJA', 'SON']
 for p in pairs:
   for model in models:
       for season in seasons:
+          print p, model, season
           t0 = time.time()
           dmodel = DownscaleModel(data, model, season=season)
           dmodel.train(location={'lat': p[0], 'lon': p[1]})
           res = dmodel.get_results()
-          res['time_to_execute'] = time.time() - t0
-          results.append(res)
+          for r in res:
+            r['time_to_execute'] = time.time() - t0
+            results.append(r)
 
 newData = comm.gather(results, root=0)
 
 if rank == 0:
-   newData = [item for l in newData for item in l]   ## condense lists of lists
-   data = pandas.DataFrame(newData)
-   data.to_csv("results.csv", index=False)
+    newData = [item for l in newData for item in l]   ## condense lists of lists
+    data = pandas.DataFrame(newData)
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    data.to_csv("linear_downscale_results_%s.csv" % timestr, index=False)
+    data.to_pickle("linear_downscale_results_%s.pkl" % timestr)
+
