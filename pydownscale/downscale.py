@@ -27,7 +27,6 @@ class DownscaleModel:
         else:
             X = self.data.get_X()
 
-        X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))  # normalize X so the columns sum to 1
         if self.season:
             X = X[self.seasonidxs, :]
 
@@ -50,10 +49,10 @@ class DownscaleModel:
         self.yhat_train = self.model.predict(self.X_train)
         self.yhat_test = self.model.predict(self.X_test)
         self.t_test = t[self.numtrain:]
-        if (time.time() - start_time) > 12*60*60:
-            f = "%s_%s.pkl" % (self.model.__class__.__name__, self.season)
+        if (time.time() - start_time) > 10.*60*60:
+            f = "%s_%s_%0.3f_%0.3f.pkl" % (self.model.__class__.__name__, self.season, self.model.gamma, self.model.lambd)
             pickle.dump(self.model, open(f, 'w'))
-            raise TimeoutError("%s %s did not complete training. Continue with file %s" % (self.model.__class__.__name__, self.season, f))
+            raise RuntimeWarning("%s %s did not complete training. Continue with file %s" % (self.model.__class__.__name__, self.season, f))
 
     def get_mse(self, y, yhat):
         return numpy.mean((y - yhat) ** 2)

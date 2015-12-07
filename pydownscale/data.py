@@ -35,7 +35,11 @@ class DownscaleData:
             times.append(d.time.values)
 
         times = numpy.array(times)
-        if numpy.sum(times[0] - times) != 0:
+        print times
+        print numpy.sum(times[0] - times) 
+        print type(numpy.sum(times[0] - times))
+        print numpy.sum(times[0] - times).item()
+        if numpy.sum(times[0] - times).item() != 0:
             raise IndexError("All times in lowres data should be identical.")
 
         if not 'time' in self.observations.dims:
@@ -55,8 +59,9 @@ class DownscaleData:
         self.observations = self.observations.loc[dict(time=self.observations.time[obstimes])]
 
         if (len(self.ncep[j].time) != len(self.observations.time)) or \
-            sum(self.ncep[j].time == self.observations.time) != len(self.ncep[j].time):
-            raise IndexError("times do not match.  add functionality if this is not an error")
+            	sum(self.ncep[j].time == self.observations.time) != len(self.ncep[j].time):
+            	print self.ncep[j].time, self.observations.time
+		raise IndexError("times do not match.  add functionality if this is not an error")
 
     def get_covariate_indices(self):
         return self.ncep.flatten()
@@ -90,7 +95,9 @@ class DownscaleData:
             location = y.columns.to_series()
             y = y.values
             cols = y[0,:] != -999.
-        return y[:, cols], location[cols]
+            y = y[:, cols]
+            location = location[cols]
+        return y, location
 
     def location_pairs(self, dim1, dim2):
         Y = self.observations.to_array()
@@ -189,22 +196,23 @@ def read_config_data_monthly():
 
     vars = os.listdir(config.ncep_dir)
     lowres = []
-    for v in vars:
+    for v in vars[:2]:
         fv = get_ncep_file_paths(os.path.join(config.ncep_dir, v))
         if len(fv) == 0:
             continue
         print v
         d = xray.open_mfdataset(fv)
+        print "Loading"
+        d.load()
+        print "Loaded"
         d = assert_bounds(d, config.lowres_bounds)
         if 'level' in d.dims:
-	    levels = [l for l in config.nceplevels if l in d.level.values]
-            print levels, d.level
+            levels = [l for l in config.nceplevels if l in d.level.values]
 	    if len(levels) > 0:
 	    	d = d.loc[dict(level=levels)]
-            else:
-		continue
-        d.load()
+
         d = d.resample('MS', 'time', how='mean')
+        print "Sampled"
         lowres.append(d)
 
     cpc = read_nc_files(config.cpc_dir)

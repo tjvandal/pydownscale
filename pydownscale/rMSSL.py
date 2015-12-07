@@ -9,26 +9,35 @@ import sys
 from scipy.linalg import solve_sylvester
 import time
 
+def hascomplex(x):
+    if numpy.iscomplex(x).sum() > 0:
+        return True
+    else:
+        return False
+
+
 def center_data(X, y):
     X_mean = X.mean(axis=0)
-    X -= X_mean
-    X_frob = numpy.diag(1/numpy.sqrt(sum(X**2)))
+    #X -= X_mean
+    X_frob = numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0)))
     X = X.dot(X_frob)
     y_mean = y.mean(axis=0)
     y -= y_mean
     return X, y, X_mean, y_mean, X_frob
 
 class pMSSL:
-    def __init__(self, max_epochs=1000, quite=True, lambd=1e-4, gamma=1e-4):
+    def __init__(self, max_epochs=1000, quite=True, lambd=1e-3, gamma=1e-3, wadmm=True):
         self.lambd = float(lambd)
         self.max_epochs = max_epochs
         self.quite = quite
         self.gamma = gamma
+        self.wadmm = wadmm
 
-    def fit(self, X, y, rho=1e-4, wadmm=True, epsomega=1e-3 ,epsw=1e-3):
+    def fit(self, X, y, epsomega=1e-3 ,epsw=1e-3):
         X, y, self.X_mean, self.y_mean, self.X_frob = center_data(X, y)
-
-        self.rho = rho
+        Xy = X.T.dot(y)
+        self.rhomax = numpy.linalg.norm(Xy, ord=numpy.inf)
+        self.rho = 0.1*numpy.linalg.norm(Xy, ord=numpy.inf)
         self.K = y.shape[1]
         self.n = y.shape[0]
         self.d = X.shape[1]
@@ -49,7 +58,7 @@ class pMSSL:
             prev_omega = self.Omega.copy()
             prev_w = self.W.copy()
             tw = time.time()
-            if wadmm:
+            if self.wadmm:
                 self.W = self._w_update_admm(X, y, rho=self.rho)
             else:
                 self.W = self._w_update(X, y)
@@ -59,23 +68,25 @@ class pMSSL:
             omegatime += (time.time() - to)
             omega_diff = numpy.linalg.norm(self.Omega - prev_omega, 2)
             w_diff = numpy.linalg.norm(prev_w - self.W, 2)
-
+            
             if (omega_diff < epsomega) and (w_diff < epsw):
                 break
 
             if not self.quite:
                 print "iteration %i, w zeros: %i, omega zeros: %i" % (t, numpy.sum(self.W == 0), numpy.sum(self.Omega == 0))
-		print "Omega Time: %f, W time: %f" % (omegatime,wtime)
-            # 24 Hours is almost up
-            if (time.time() - start_time) > (12. * 60 * 60):
-                return
+                print "Omega diff:", omega_diff, "\tW Diff:", w_diff
 
-        print "Converged in %i" % (t)
+            # 24 Hours is almost up
+            if (time.time() - start_time) > (10. * 60 * 60):
+                break
+
+        minutes = (time.time() - start_time) / 60.
+        print "Gamma: %0.2f, Lambda: %0.2f, Converged in %i iterations, %2.2f Minutes" % (self.gamma, self.lambd, t, minutes)
         #print "Amount of time to train Omega: %f" % omegatime
         #print "Amount of time to train W:     %f" % wtime
 
-    def cost(self, X, W, Omega):
-        cost, _ = self._w_cost(X, W)
+    def cost(self, X, y, W, Omega):
+        cost, _ = self._w_cost(X, y, W)
         if numpy.sum(Omega) != 0:
             cost -= self.K/2.*numpy.log(numpy.linalg.det(Omega))
         cost += self.lambd * numpy.linalg.norm(Omega, 1)
@@ -97,20 +108,25 @@ class pMSSL:
             [X > thres, numpy.abs(X) <= thres, X < -thres], 
             [lambda X: X - thres, 0, lambda X: X+thres])
 
-    def _omega_update(self, y, Omega, rho):
-        if self.lambd == 0:
-            return numpy.zeros(shape=Omega.shape)
-        maxrho = 10
+    def _omega_update(self, y, Omega, rho, epochs=100):
+        maxrho = self.rhomax
         Z = numpy.zeros(shape=(self.K, self.K))
         U = numpy.zeros(shape=(self.K, self.K))
         j = 0
         resid = []
-        S = self.W.T.dot(self.W)
+        # Sp = self.W.T.dot(self.W)   # why is this in the MSSL paper?
+        S = numpy.cov(self.W.T)
+
         epsabs = 1e-3
         epsrel = 1e-3
-        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(y, 2)
-        for j in range(1000):
-            L, Q = numpy.linalg.eig(self.rho * (Z - U) - S)
+
+        for j in range(100):
+            try:
+                L, Q = numpy.linalg.eigh(self.rho * (Z - U) - S)
+            except numpy.linalg.LinAlgError:
+                #raise numpy.linalg.LinAlgError("Gamma: %f Lambda: %f W:\n" % (self.gamma, self.lambd) + numpy.array_str(self.W) + "\n")
+                pass
+
             Omega_tilde = numpy.eye(self.K)
 
             numpy.fill_diagonal(Omega_tilde, (L + numpy.sqrt(L**2 + 4*rho))/(2*rho))
@@ -119,38 +135,45 @@ class pMSSL:
             Z = self.softthreshold(Omega + U, self.lambd/rho)
             U = U + Omega - Z
 
-            dualresid = numpy.linalg.norm(self.rho * (Z - Z_prev), 2)
-            primalresid = numpy.linalg.norm(Omega - Z, 2)
-            epspri = numpy.sqrt(self.d) * epsabs + epsrel * numpy.max([numpy.linalg.norm(Omega, 2), numpy.linalg.norm(Z, 2), 0])
+            dualresid = numpy.linalg.norm(-rho * (Z - Z_prev), 'fro')
+            primalresid = numpy.linalg.norm(Omega - Z, 'fro')
+
+            epspri = self.n * epsabs + epsrel * numpy.max([numpy.linalg.norm(Omega, 'fro'), numpy.linalg.norm(Z, 'fro'), 0])
+            epsdual = self.n * epsabs + epsrel * numpy.linalg.norm(rho*U, 'fro')
 
             rho = min(rho*1.1, maxrho)
             if (j % 500) == 1 and (not self.quite):
                 print "omega update:", j, "Dualresid:", dualresid
 
+            comp = numpy.iscomplex(Z).sum()
+            #print "ZPrev", Z_prev[:5, :5]
+            #print "Z", Z[:5,:5]
+            #print "S", S[:5, :5]
             if (dualresid < epsdual) and (primalresid < epspri):
                 break
-
+        print "Omega", j+1
         return Z
 
 
    # Lets save the proximal descent update
     def _w_update(self, X, y):
-        costdiff = 1e-6
+        costdiff = 1
         W = self.W
         j = 0
         t0 = time.time()
-        tk = 1/(2*numpy.linalg.norm(X.T.dot(X), 1)) # tk exits in (0, 1/||X.T*X||)
+        tk = 1/(numpy.linalg.norm(X.T.dot(X), 1)) # tk exits in (0, 1/||X.T*X||)
         XX = X.T.dot(X)
         XY = X.T.dot(y)
-        while costdiff > 1e-6:
-            cost, gmat = self._w_cost(X, W, XX=XX, XY=XY)
+        while costdiff > 1e-5:
+            cost, gmat = self._w_cost(X, y, W, XX=XX, XY=XY)
             W = self.shrinkage_threshold(W - tk*gmat, alpha=self.gamma*tk)
             if j == 0:
                 costdiff = numpy.abs(cost)
             else:
                 costdiff = numpy.abs(costprev - cost)
+
             costprev = cost
-            if (j > 20000):
+            if (j > 10000):
                 print "Warning: W did not converge."
                 break
             j += 1
@@ -172,43 +195,49 @@ class pMSSL:
         return numpy.sum(f), gmat
 
     def _w_update_admm(self, X, y, rho):
-        maxrho = 10
+        maxrho = self.rhomax
         Z = numpy.zeros(shape=(self.d, self.K))
         U = numpy.zeros(shape=(self.d, self.K))
         j = 0
         XX = X.T.dot(X)  # dxd
         Xy = X.T.dot(y)  # dxk
         Theta = self.W.copy()      # dxk
-        epsabs = 1e-3
-        epsrel = 1e-3
-        epsdual = numpy.sqrt(self.n) * epsabs + epsrel * numpy.linalg.norm(y,2)
+        epsabs = 1e-5
+        epsrel = 1e-5
         tsum = 0.
-        for j in range(1000):
+        #for j in range(self.max_epochs):  
+        for j in range(100): 
+            comp = numpy.iscomplex(Theta).sum()
             prevTheta = Theta.copy()
             C = Xy + rho * (Z - U)
             t0 = time.time()
             Theta = solve_sylvester(XX + rho * numpy.eye(XX.shape[0]), 2*self.Omega, C)
             #print "Time to solve sylvester", time.time() - t0
-	    tsum += time.time() - t0
+            tsum += time.time() - t0
             Z_prev = Z.copy()
             Z = self.softthreshold(Theta + U, self.gamma/rho)
             U = U + Theta - Z
             if (j % 100 == 0) and (not self.quite):
                 print j, numpy.linalg.norm(prevTheta - Theta, 2)
             #rho = min(rho*1.1, maxrho)
-
-            dualresid = numpy.linalg.norm(self.rho*(Z - Z_prev), 2)
+            rho *= 1.1
+            dualresid = numpy.linalg.norm(-rho*(Z - Z_prev), 2)
             primalresid = numpy.linalg.norm(Theta - Z, 2)
-            epspri = numpy.sqrt(self.d) * epsabs + epsrel * numpy.max([numpy.linalg.norm(Theta, 2), numpy.linalg.norm(Z, 2), 0])
-            
+            epspri = self.n * epsabs + epsrel * numpy.max([numpy.linalg.norm(Theta, 2), numpy.linalg.norm(Z, 2), 0])
+            epsdual = self.n * epsabs + epsrel * numpy.linalg.norm(rho*U,2)
+
             if (dualresid < epsdual) and (primalresid < epspri):
                 #print "Converged in %i" % j
                 break
 
+            if numpy.abs(Z).mean() > 1e10:
+                print j, rho
+            #if j % 5 == 0:
+            print "Iteration: %i, Rho: %2.2f, Dualresid: %2.4f, EPS_Dual: %2.4f, PriResid: %2.4f, EPS_Pri: %2.4f" % (j, rho, dualresid, epsdual, primalresid, epspri)
+
         return Z
 
     def predict(self, X):
-        X -= self.X_mean
         X = X.dot(self.X_frob)
         return X.dot(self.W) + self.y_mean
 

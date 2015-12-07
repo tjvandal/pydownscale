@@ -10,6 +10,9 @@ from rMSSL import pMSSL
 import time
 from sklearn.utils.extmath import cartesian
 import pandas
+import pickle
+from data import DownscaleData
+from downscale import DownscaleModel
 
 def test1_data():
     numpy.random.seed(0)
@@ -25,7 +28,7 @@ def test1_data():
     W[rows2, 5:] += numpy.random.normal(0, 2, size=(len(rows2), 1))
 
     X = numpy.random.uniform(-1, 1, size=(n, d))
-    X = X.dot(numpy.diag(1/numpy.sqrt(sum(X**2))))
+    X = X.dot(numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0))))
     y = X.dot(W) + numpy.random.normal(0, 0.01, size=(n, k))
     return X, y, W
 
@@ -73,7 +76,7 @@ def test1_mpi():
 def test1():
     X, y, W = test1_data()
     ntrain = int(y.shape[0]*0.80)
-    g, l = 100, 100
+    g, l = 1e-2, 1e-2
     print "mssl"
     mssl = pMSSL(max_epochs=1000, quite=False, gamma=g, lambd=l)
     mssl.fit(X[:ntrain], y[:ntrain], rho=1e-2)
@@ -82,7 +85,22 @@ def test1():
     num_omega_zeros = numpy.sum(mssl.Omega == 0)
     num_w_zeros = numpy.sum(mssl.W == 0)
     d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros}
+    print mssl.W
     print d
 
+def climate():
+
+    lambd = 1e2
+    gamma = 1e2
+    season = "DJF"
+    data = pickle.load(open("/scratch/vandal.t/experiments/DownscaleData/monthly_804_3150.pkl", "r"))
+    model = pMSSL(lambd=lambd, gamma=gamma, max_epochs=1000)
+    dmodel = DownscaleModel(data, model, season=season)
+    dmodel.train()
+    print dmodel.model.Omega[:5, :5]
+    print dmodel.model.W[:5, :5]
+    print "Omega to zero", numpy.sum(dmodel.model.Omega == 0)
+    print "W to zero", numpy.sum(dmodel.model.W == 0)
+
 if __name__ == "__main__":
-    test1()
+    climate()
