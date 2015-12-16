@@ -49,10 +49,10 @@ class DownscaleModel:
         self.yhat_train = self.model.predict(self.X_train)
         self.yhat_test = self.model.predict(self.X_test)
         self.t_test = t[self.numtrain:]
-        if (time.time() - start_time) > 10.*60*60:
+        if (time.time() - start_time) > 20.*60*60:
             f = "%s_%s_%0.3f_%0.3f.pkl" % (self.model.__class__.__name__, self.season, self.model.gamma, self.model.lambd)
-            pickle.dump(self.model, open(f, 'w'))
-            raise RuntimeWarning("%s %s did not complete training. Continue with file %s" % (self.model.__class__.__name__, self.season, f))
+            #pickle.dump(self.model, open(f, 'w'))
+            #raise RuntimeWarning("%s %s did not complete training. Continue with file %s" % (self.model.__class__.__name__, self.season, f))
 
     def get_mse(self, y, yhat):
         return numpy.mean((y - yhat) ** 2)

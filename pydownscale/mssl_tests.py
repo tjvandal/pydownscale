@@ -1,4 +1,9 @@
-__author__ = 'tj'
+#!/shared/apps/sage/sage-5.12/spkg/bin/sage -python
+'''
+local testing command:
+mpirun -np 1 /shared/apps/sage/sage-5.12/spkg/bin/sage -python mssl_tests.py
+'''
+
 import sys
 sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
 
@@ -41,26 +46,28 @@ def test1_mpi():
     
     X, y, W = test1_data()
     ntrain = int(y.shape[0]*0.80)
-    gspace = numpy.linspace(0, 4, 50)
-    lspace = numpy.linspace(0, 2, 50)[1:]
-    space = cartesian([gspace, lspace])
+    gspace = numpy.linspace(1e-4, 4, 10)
+    lspace = numpy.linspace(1e-4, 2, 10)
 
     if rank == 0:
+        space = numpy.asarray([[g, l] for g in gspace for l in lspace])
         split = numpy.array_split(space, size)
+
     else:
-        split = 0
+        split = None
 
     split = comm.scatter(split, root=0)
     results = []
     for g, l in split:
         try:
             mssl = pMSSL(max_epochs=1000, quite=True, gamma=g, lambd=l)
-            mssl.fit(X[:ntrain], y[:ntrain], rho=1e-2)
+            mssl.fit(X[:ntrain], y[:ntrain])
             yhat = mssl.predict(X[ntrain:])
             mse = numpy.mean((yhat - y[ntrain:])**2)
             num_omega_zeros = numpy.sum(mssl.Omega == 0)
             num_w_zeros = numpy.sum(mssl.W == 0)
-            d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros}
+            d = {"gamma": g, "lambda": l, "mse": mse, 
+            "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros}
         except Exception as err:
             sys.stderr.write("Gamma: %f, Lambda: %f\n%s" % (g, l, err))
             d = {"error": 1, "gamma": g, "lambda": l}
@@ -75,17 +82,18 @@ def test1_mpi():
 
 def test1():
     X, y, W = test1_data()
+    print "X shape", X.shape, " Y shape:", y.shape
     ntrain = int(y.shape[0]*0.80)
-    g, l = 1e-2, 1e-2
+    g, l = 1e-3, 1e-4
     print "mssl"
-    mssl = pMSSL(max_epochs=1000, quite=False, gamma=g, lambd=l)
-    mssl.fit(X[:ntrain], y[:ntrain], rho=1e-2)
+    mssl = pMSSL(max_epochs=1000, quite=True, gamma=g, lambd=l)
+    mssl.fit(X[:ntrain], y[:ntrain])
     yhat = mssl.predict(X[ntrain:])
     mse = numpy.mean((yhat - y[ntrain:])**2)
     num_omega_zeros = numpy.sum(mssl.Omega == 0)
     num_w_zeros = numpy.sum(mssl.W == 0)
     d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros}
-    print mssl.W
+    #print mssl.W
     print d
 
 def climate():
@@ -103,4 +111,7 @@ def climate():
     print "W to zero", numpy.sum(dmodel.model.W == 0)
 
 if __name__ == "__main__":
-    climate()
+    #climate()
+    #test1()
+    test1_mpi()
+

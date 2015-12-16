@@ -235,7 +235,7 @@ if __name__ == "__main__":
     fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)
     pickle.dump(D, open(f, 'w'))
-
+    print "Saved for file: %s" % f
     '''
     import config
     ncep_dir = config.ncep_dir
