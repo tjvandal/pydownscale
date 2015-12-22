@@ -9,27 +9,9 @@ import pydownscale.config as config
 import pandas
 from sklearn.linear_model import MultiTaskLassoCV, LassoCV
 import numpy
+import pickle
 
-t0 = time.time()
-cmip5_dir = config.cmip5_dir
-cpc_dir = config.cpc_dir
-
-# climate model data, monthly
-cmip5 = read_nc_files(cmip5_dir)
-cmip5.load()
-cmip5 = assert_bounds(cmip5, config.lowres_bounds)
-cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
-
-# daily data to monthly
-cpc = read_nc_files(cpc_dir)
-cpc.load()
-cpc = assert_bounds(cpc, config.highres_bounds)
-monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
-
-print "Data Loaded: %d seconds" % (time.time() - t0)
-data = DownscaleData(cmip5, monthlycpc)
-data.normalize_monthly()
-
+data = pickle.load(open("/scratch/vandal.t/experiments/DownscaleData/monthly_804_3150.pkl", "r"))
 
 # print "Data Normalized: %d" % (time.time() - t0)
 X = data.get_X()

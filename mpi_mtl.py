@@ -26,7 +26,7 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_3150.pkl')) 
+data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_420.pkl')) 
 pairs = data.location_pairs('lat', 'lon')
 
 
