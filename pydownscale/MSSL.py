@@ -146,7 +146,8 @@ class pMSSL:
             epsdual = self.n * epsabs + epsrel * numpy.linalg.norm(rho*U, 'fro')
 
             #if (j % 50) == 1 and (not self.quite):
-            #print "omega update:", j, "Dualresid:", dualresid, "Dual EPS:", epsdual
+            if not self.quite:
+                print "omega update:", j, "Dualresid:", dualresid, "Dual EPS:", epsdual
 
             comp = numpy.iscomplex(Z).sum()
             #print "ZPrev", Z_prev[:5, :5]
@@ -197,7 +198,7 @@ class pMSSL:
         gmat += 2*W.dot(self.Omega) # *self.lambd
         return numpy.sum(f), gmat
 
-    def _w_update_admm(self, X, y, rho):
+    def _w_update_admm(self, X, y, rho, alpha=1.3):
         #Z = numpy.zeros(shape=(self.d, self.K))
         Z = self.W.copy()  ## warm start
         U = numpy.zeros(shape=(self.d, self.K))
@@ -217,15 +218,21 @@ class pMSSL:
             #print "Time to solve sylvester", time.time() - t0
             tsum += time.time() - t0
             Z_prev = Z.copy()
+            Theta_hat = alpha*Theta + (1 - alpha)*Z_prev;
             Z = self.softthreshold(Theta + U, self.gamma/rho)
             U = U + Theta - Z
             if (j % 100 == 0) and (not self.quite):
                 print j, numpy.linalg.norm(prevTheta - Theta, 2)
 
             dualresid = numpy.linalg.norm(-rho*(Z - Z_prev), 2)
+
             primalresid = numpy.linalg.norm(Theta - Z, 2)
             epspri = self.n * epsabs + epsrel * numpy.max([numpy.linalg.norm(Theta, 2), numpy.linalg.norm(Z, 2), 0])
             epsdual = self.n * epsabs + epsrel * numpy.linalg.norm(rho*U,2)
+
+            if (j > 0) and (prevdual < dualresid):
+                break
+            prevdual = dualresid
 
             if (dualresid < epsdual) and (primalresid < epspri):
                 #print "Converged in %i" % j
