@@ -62,6 +62,8 @@ class pMSSL:
         elif (self.walgo == 'mpi') and (not hasattr(self, 'W')):
             self.W = WDistributed(rho=self.rho, gamma=self.gamma, lambd=self.lambd, 
                 shape=(self.d, self.K), maxepoch=self.w_epochs, quiet=self.quiet)
+        elif (self.walgo == 'fista') and (not hasattr(self, 'W')):
+            self.W = WFista(self.gamma, self.lambd, shape=(self.d, self.K), maxepochs=self.w_epochs, epscost=1e-4)
 
         if not hasattr(self, 'Omega'):
             self.Omega = OmegaADMM(rho=self.rho, gamma=self.gamma, lambd=self.lambd, K=self.K)
@@ -100,66 +102,61 @@ class pMSSL:
 
 
     def cost(self, X, y, W, Omega):
-        cost, _ = self._w_cost(X, y, W)
+        cost = 0.5*numpy.linalg.norm(y - X.dot(W), 2)
+        cost += self.lambd*numpy.trace(W.dot(Omega).dot(W.T))
         if numpy.sum(Omega) != 0:
             cost -= self.K/2.*numpy.log(numpy.linalg.det(Omega))
         cost += self.lambd * numpy.linalg.norm(Omega, 1)
         return cost 
 
-    def shrinkage_threshold(self, a, alpha):
-        return numpy.maximum(numpy.zeros(shape=a.shape), a-alpha) - numpy.maximum(numpy.zeros(shape=a.shape), -a-alpha)
+    def predict(self, X):
+        X = X.dot(self.X_frob)
+        return X.dot(self.W.values) + self.y_mean
 
-    def _softthres(self, x, thres):
-        if x > thres:
-            return x - thres
-        elif numpy.abs(x) < thres:
-            return 0
-        else:
-            return x+thres
+class WFista:
+    def __init__(self, gamma, lambd, shape, maxepochs=100, epscost=1e-4):
+        self.gamma = gamma
+        self.lambd = lambd
+        self.values = numpy.zeros(shape)
+        self.maxepochs = maxepochs
+        self.epscost = epscost
 
-   # Lets save the proximal descent update
-    def _w_update(self, X, y):
-        costdiff = 1
-        W = self.W
-        j = 0
-        t0 = time.time()
+    def update(self, X, y, Omega):
+        Theta = self.values.copy()
         tk = 1/(numpy.linalg.norm(X.T.dot(X), 1)) # tk exits in (0, 1/||X.T*X||)
+        # cache these
         XX = X.T.dot(X)
         XY = X.T.dot(y)
-        while costdiff > 1e-5:
-            cost, gmat = self._w_cost(X, y, W, XX=XX, XY=XY)
+        for j in range(self.maxepochs):
+            cost, gmat = self._w_cost(X, y, Theta, Omega, XX=XX, XY=XY)
             W = self.shrinkage_threshold(W - tk*gmat, alpha=self.gamma*tk)
             if j == 0:
                 costdiff = numpy.abs(cost)
             else:
                 costdiff = numpy.abs(costprev - cost)
-
             costprev = cost
-            if (j > self.w_epochs):
-                #print "Warning: W did not converge."
+            if costdiff < self.epscost:
                 break
-            j += 1
 
-        return W
+        self.values = Theta
 
-    # Lets parallelize this
-    def _w_cost(self, X, y, W,  XX=None, XY=None):
-        XW = X.dot(W)
+        # Lets parallelize this
+    def _w_cost(self, X, y, Theta, Omega, XX=None, XY=None):
+        XW = X.dot(Theta)
         if XX is None:
             XX = X.T.dot(X)
         if XY is None:
             XY = X.T.dot(y)
         f = 0.5*numpy.linalg.norm(y - XW, 2)
-        #f = (y-XW).T.dot((y-XW)) / (2*len(y))
-        f += self.lambd*numpy.trace(W.dot(self.Omega).dot(W.T))
+        f += self.lambd*numpy.trace(W.dot(Omega).dot(W.T))
         gmat = (XX.dot(W) - XY)/len(y)  # the gradients
-        gmat += 2*W.dot(self.Omega) # *self.lambd
+        gmat += 2*W.dot(Omega) # *self.lambd
         return numpy.sum(f), gmat
 
 
-    def predict(self, X):
-        X = X.dot(self.X_frob)
-        return X.dot(self.W.values) + self.y_mean
+    def shrinkage_threshold(self, a, alpha):
+        return numpy.maximum(numpy.zeros(shape=a.shape), a-alpha) - numpy.maximum(numpy.zeros(shape=a.shape), -a-alpha)
+
 
 class OmegaADMM:
     def __init__(self, gamma, lambd, rho, K, omega_epochs=100, quiet=True):
