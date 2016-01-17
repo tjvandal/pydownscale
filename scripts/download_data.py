@@ -2,7 +2,7 @@ __author__ = 'tj'
 import os
 import sys
 
-BASE_DIR = "/scratch/vandal.t/"
+BASE_DIR = "/gss_gpfs_scratch/vandal.t/"
 
 def mergetime(dir, var):
     files = [os.path.join(dir, f) for f in os.listdir(dir)]
@@ -26,8 +26,8 @@ def download_ncep_daily():
     variables_levels = ['air', 'rhum', 'uwnd', 'vwnd']
     ncep_pressure_levels = "ftp://ftp.cdc.noaa.gov/Datasets/ncep.reanalysis.dailyavgs/pressure/%s.%i.nc"
     cmd = 'wget %s' % (ncep_pressure_levels)
-    ncep_dir = os.path.join(BASE_DIR, "ncep/daily")
-    plv_path = os.path.join(ncep_dir, 'plv')
+    ncep_dir = os.path.join(BASE_DIR, "ncep/daily/downscale-data")
+    plv_path = ncep_dir #os.path.join(ncep_dir, 'plv')
 
     checkpath(ncep_dir)
     checkpath(plv_path)
