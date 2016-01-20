@@ -11,7 +11,7 @@ normalization is no needed at this step, atleast until training
 '''
 
 class DownscaleData:
-	def __init__(self, reanalysis, observations):
+    def __init__(self, reanalysis, observations):
 		if isinstance(reanalysis, xray.Dataset):
 			reanalysis = [reanalysis]
 
@@ -21,13 +21,13 @@ class DownscaleData:
 		self._checkindices()
 		self._matchdates()
 
-	def _check_reanalysis(self):
+    def _check_reanalysis(self):
 		for _, n in self.reanalysis.iteritems():
 			if (not isinstance(n, xray.Dataset)) and (not isinstance(n, xray.DataArray)):
 				raise TypeError("Ncep should be a list of xray datasets or dataarrays.")
 
 	# can we make this dynamic in the future?
-	def _checkindices(self):
+    def _checkindices(self):
 		times = []
 		for _, d in self.reanalysis.iteritems():
 			if not 'time' in d.dims:
@@ -42,7 +42,7 @@ class DownscaleData:
 			raise IndexError("time should be a dimension of observations")
 
 	# Line up datasets so that the times match.  Exclude observations outside of the timeframe.
-	def _matchdates(self):
+    def _matchdates(self):
 		key1 = self.reanalysis.keys()[0]
 		mintime = max(self.reanalysis[key1].time.min(), self.observations.time.min())
 		maxtime = min(self.reanalysis[key1].time.max(), self.observations.time.max())
@@ -60,18 +60,17 @@ class DownscaleData:
 				print self.reanalysis[key1].time, self.observations.time
 				raise IndexError("times do not match.  add functionality if this is not an error")
 
-	def get_X(self, timedim='time'):
-		import config
-		x = []
-		for var in config.reanalysisvars:
-			self.reanalysis[var].load()
-			df = self.reanalysis[var].to_array().to_dataframe()
-			levels = sorted([v for v in df.index.names if v != timedim])
-			x.append(df.unstack(levels).values)
-
-		x = numpy.column_stack(x)
-		return x
-
+    def get_X(self, timedim='time'):
+        import config
+        x = []
+        for var in config.reanalysisvars:
+            self.reanalysis[var].load()
+            print self.reanalysis[var]
+            df = self.reanalysis[var].to_array().to_dataframe()
+            levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
+            x.append(df.unstack(levels).values)
+        x = numpy.column_stack(x)
+        return x
 
 	def get_y(self, location=None, timedim='time'):
 		if location is not None:
@@ -150,7 +149,6 @@ def read_nc_files(dir, bounds=None):
 
     files = get_reanalysis_file_paths(dir)
     if len(files) > 1:
-        print files[32:35]
         data = xray.open_mfdataset(files[30:33], preprocess=lambda d: assert_bounds(d, bounds))
     elif len(files) == 1:
         data = xray.open_dataset(files[0])
@@ -223,19 +221,29 @@ def read_lowres_data(how='MS', which='reanalysis'):
         d = xray.open_mfdataset(fv[:3], preprocess=lambda d: assert_bounds(d, config.lowres_bounds))
         print "loading"
         d.load()
-        if 'plev' in d.dims:
-            levels = [l*100. for l in config.reanalysislevels if l*100. in d.plev.values]
-            if len(levels) > 0:
-                d = d.loc[dict(plev=levels)]
+        levs = set(d.dims.keys()).intersection(set(('lev', 'plev', 'level')))
+        if len(levs) >  1:
+            raise(Exception("What level to use?" + str(levs)))
+        elif len(levs) == 0:
+            lowres[v] = d
+            continue
+        else:
+            lev = levs.pop()
+        
+        levels = [l for l in config.reanalysislevels if l in d[lev].values]
+        if len(levels) > 0:
+            d = d.loc[{lev: levels}]
 
-        elif 'level' in d.dims:
-            levels = [l for l in config.reanalysislevels if l in d.level.values]
+        d.rename({lev: 'plev'}, inplace=True)
 
-            if len(levels) > 0:
-                d = d.loc[dict(level=levels)]
-        print d.dims
+        if 'time_bnds' in d.keys():
+            del d['time_bnds']
+        if 'bnds' in d.keys():
+            del d['bnds']
+
         d = d.resample(how, 'time', how='mean')
         lowres[v] = d
+
     return lowres
 
 def read_obs(how='MS'):
@@ -246,9 +254,33 @@ def read_obs(how='MS'):
     obs = obs.resample('MS', dim='time', how='mean')
     return obs
 
+def test_transformation():
+    import config
+    import pickle
+    
+    variables = zip(config.reanalysisvars, config.gcmvars)
+    print variables
+    print "reading reanalysis"
+    reanalysis = read_lowres_data(which='reanalysis', how='MS')
+    print "reading observations"
+    obs = read_obs(how='obs')
+    D = DownscaleData(reanalysis, obs)
+    gcm = read_lowres_data(which='gcm', how='MS')
+    G = GCMData(gcm)
+    print G.data.keys()
+    for i, (vr, vg) in enumerate(variables):
+        print i, vr, vg
+    X = D.get_X()
+    print "Shape of X:", X.shape
+
+    GX = G.get_X()
+
 if __name__ == "__main__":
     import config
     import pickle
+    
+#    test_transformation()
+#    sys.exit()
 
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how='MS')
