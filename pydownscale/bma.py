@@ -34,7 +34,6 @@ class BMA:
 
         self.sigma2 = sigma2
 
-
     def sample_variance(self, Z, y):
         zsum = Z.sum(axis=0)
         zsum[zsum < numpy.finfo(float).eps] = 10*numpy.finfo(float).eps

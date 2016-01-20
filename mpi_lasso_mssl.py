@@ -15,30 +15,40 @@ from sklearn.linear_model import LinearRegression, Lasso, MultiTaskLassoCV
 from sklearn.feature_selection import RFE
 from pydownscale.data import DownscaleData, read_nc_files
 from pydownscale.downscale import DownscaleModel
-from pydownscale.rMSSL import pMSSL
+from pydownscale.MSSL import pMSSL
 import pydownscale.config as config
 import argparse
 import pandas
 import pickle
 
 
+epochs = 100
+omega_epochs = 100
+w_epochs = 100
+
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_3150.pkl')) 
+print "Size: %i, Rank: %i" % (size, rank)
+
+data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_420.pkl')) 
 total_feature_count = data.get_X().shape[1]
 
-seasons = ['DJF', 'MAM', 'JJA', 'SON'] #[:1]
-lambda_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(2.), num=10)
-gamma_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(2.), num=10)
+#seasons = ['DJF', 'MAM', 'JJA', 'SON']
+#lambda_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(10.), num=10)
+#gamma_range = numpy.logspace(numpy.log10(1e-2), numpy.log10(100.), num=5)
+
+seasons = ['SON']
+gamma_range=[0.01]
+lambda_range = [10.0]
+
 params = [[g, l, s] for g in gamma_range for l in lambda_range for s in seasons]
-print "Number of Parameter Sets:", len(params)
 features = {}
 
 for seas in seasons:
 	if rank == 0:
-		pairs = data.location_pairs('lat', 'lon')
+		pairs = data.location_pairs('lat', 'lon')[:1]
 		pairs = numpy.array_split(pairs, size)
 	else:
 		pairs = None
@@ -47,11 +57,11 @@ for seas in seasons:
 	coefficients = []
 
 	for p in pairs:
-		model = Lasso(alpha=0.05, normalize=True)
+		model = Lasso(alpha=0.0001, normalize=True)
 		dmodel = DownscaleModel(data, model, season=seas)
 		dmodel.train(location={'lat': p[0], 'lon': p[1]})
-		res = dmodel.get_results(test_set=False)
-		print "Lasso Pearson", numpy.mean([r['spearman'] for r in res])
+		res = dmodel.get_results(test_set=True)
+		print "Lasso RMSE", numpy.mean([r['rmse'] for r in res])
 		coef = dmodel.model.coef_
 		nonzerocoef = numpy.nonzero(coef)[0]
 		coefficients.append(nonzerocoef)
@@ -66,45 +76,44 @@ for seas in seasons:
 	features = comm.scatter([features]*size, root=0)
 
 if rank == 0:
-	params = numpy.array_split(params, size)
+	params = numpy.array_split(numpy.asarray(params), size)
 else:
 	params = None
 
 params = comm.scatter(params, root=0)
+print "Rank:", rank, "Params:", params
 model_costs = []
 model_results = []
 for g, l, seas in params:
-	model = pMSSL(max_epochs=30, gamma=float(g), lambd=float(l), quite=False)
-	#model = pMSSL(max_epochs=100, gamma=0., lambd=0., quite=False, wadmm=True)
+	print "Rank: %i, Gamma: %s, Lambda: %s, Season: %s" % (rank, str(g), str(l), str(seas))	
+	model = pMSSL(max_epochs=epochs, gamma=float(g), lambd=float(l), 
+		quiet=False, omega_epochs=omega_epochs, w_epochs=w_epochs, walgo='admm')
 	t0 = time.time()
 	try:
 		dmodel = DownscaleModel(data, model, season=seas, feature_columns=features[seas])
 		dmodel.train()
 		res = dmodel.get_results(test_set=True)
-		print "Model Average Pearson", numpy.mean([r['pearson'] for r in res])
+		print "Omega Zeros: %i, W Zeros: %i" % ((dmodel.model.Omega == 0).sum(), (dmodel.model.W == 0).sum()) 
+		print "Model Average Rmse: %f, Gamma: %s, Lambda: %s, Season: %s" % (numpy.mean([r['rmse'] for r in res]), g, l, seas)
+		for r in res:
+			r['gamma'] = g
+			r['lambd'] = l
+			r['omega'] = dmodel.model.Omega
+			r['W'] = dmodel.model.W
+			model_results.append(r)
+
 	except RuntimeWarning as err:
 		pass
 	except Exception as err:
 		print g, l, err
 		continue
-
-	# cost = dmodel.model.cost(dmodel.X_train, dmodel.y_train, dmodel.model.W, dmodel.model.Omega)
-	# model_costs.append([seas, cost, dmodel])
-
-	res = dmodel.get_results()
-	for r in res:
-		r['gamma'] = g
-		r['lambd'] = l
-		r['omega'] = dmodel.model.Omega
-		r['W'] = dmodel.model.W
-		model_results.append(r)
-
+		
 model_results = comm.gather(model_results, root=0)
 
 if rank == 0:
+	print "Attempting to gather Results"
 	results = [r for res in model_results for r in res]
 	data = pandas.DataFrame(results)
 	timestr = time.strftime("%Y%m%d-%H%M%S")
-	data.to_csv("mssl_downscale_results_%s.csv" % timestr, index=False)
-	data.to_pickle("mssl_downscale_results_%s.pkl" % timestr)
+	data.to_pickle("mssl_downscale_results_%i_%s.pkl" % (epochs, timestr))
 
