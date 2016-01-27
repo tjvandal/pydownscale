@@ -28,18 +28,18 @@ class DownscaleData:
 
 	# can we make this dynamic in the future?
     def _checkindices(self):
-		times = []
-		for _, d in self.reanalysis.iteritems():
-			if not 'time' in d.dims:
-				raise IndexError("time should be a dimension of cmip")
-			times.append(d.time.values)
+        times = []
+        for _, d in self.reanalysis.iteritems():
+            if not 'time' in d.dims:
+                raise IndexError("time should be a dimension of cmip")
+            times.append(d.time.values)
 
-		times = numpy.array(times)
-		if numpy.sum(times[0] - times).item() != 0:
-			raise IndexError("All times in lowres data should be identical.")
+        times = numpy.array(times)
+        if numpy.sum(times[0] - times).item() != 0:
+            raise IndexError("All times in lowres data should be identical.")
 
-		if not 'time' in self.observations.dims:
-			raise IndexError("time should be a dimension of observations")
+        if not 'time' in self.observations.dims:
+            raise IndexError("time should be a dimension of observations")
 
 	# Line up datasets so that the times match.  Exclude observations outside of the timeframe.
     def _matchdates(self):
@@ -63,75 +63,78 @@ class DownscaleData:
     def get_X(self, timedim='time'):
         import config
         x = []
-        for var in config.reanalysisvars:
+        for var in self.reanalysisvars: # this order is important
             self.reanalysis[var].load()
-            print self.reanalysis[var]
             df = self.reanalysis[var].to_array().to_dataframe()
             levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
             x.append(df.unstack(levels).values)
         x = numpy.column_stack(x)
         return x
 
-	def get_y(self, location=None, timedim='time'):
-		if location is not None:
-			y = self.observations.loc[location].to_array().values.squeeze()
-		else:
-			y = self.observations.to_array().to_dataframe()
-			levels = [var for var in y.index.names if var != timedim]
-			y = y.unstack(levels)
-			location = y.columns.to_series()
-			y = y.values
-			cols = y[0,:] != -999.
-			y = y[:, cols]
-			location = location[cols]
-		return y, location
+    def get_y(self, location=None, timedim='time'):
+        if location is not None:
+            y = self.observations.loc[location].to_array().values.squeeze()
+        else:
+            y = self.observations.to_array().to_dataframe()
+            levels = [var for var in y.index.names if var != timedim]
+            y = y.unstack(levels)
+            location = y.columns.to_series()
+            y = y.values
+            cols = y[0,:] != -999.
+            y = y[:, cols]
+            location = location[cols]
+        return y, location
 
-	def location_pairs(self, dim1, dim2):
-		Y = self.observations.to_array()
-		if (dim1 not in Y.dims) or (dim2 not in Y.dims):
-			raise IndexError("dim1=%s and dim2=%s are not in observations." % (dim1, dim2))
-		if len(Y.dims) != 4:
-			raise ValueError("There should be 4 dimensions with only 1 variable.")
+    def location_pairs(self, dim1, dim2):
+        Y = self.observations.to_array()
+        if (dim1 not in Y.dims) or (dim2 not in Y.dims):
+            raise IndexError("dim1=%s and dim2=%s are not in observations." % (dim1, dim2))
+        if len(Y.dims) != 4:
+            raise ValueError("There should be 4 dimensions with only 1 variable.")
 
-		t0 = Y['time'].values[0]
-		t0array = self.observations.loc[dict(time=t0)].to_array()
+        t0 = Y['time'].values[0]
+        t0array = self.observations.loc[dict(time=t0)].to_array()
 
-		# check which dimension axes
-		dims = t0array.dims
-		dim1_axis = [j for j in range(len(dims)) if dims[j] == dim1][0]
-		dim2_axis = [j for j in range(len(dims)) if dims[j] == dim2][0]
-		t0values = t0array.values
-		if dim1_axis > dim2_axis:
-			t0values = numpy.swapaxes(t0values, dim1_axis, dim2_axis)
+        # check which dimension axes
+        dims = t0array.dims
+        dim1_axis = [j for j in range(len(dims)) if dims[j] == dim1][0]
+        dim2_axis = [j for j in range(len(dims)) if dims[j] == dim2][0]
+        t0values = t0array.values
+        if dim1_axis > dim2_axis:
+            t0values = numpy.swapaxes(t0values, dim1_axis, dim2_axis)
 
-		t0values = t0values.squeeze()
+        t0values = t0values.squeeze()
 
-		if isinstance(t0values, float):
-			t0values = numpy.array(t0values)
-			t0values = t0values[:, numpy.newaxis]
-		elif len(Y.coords[dim1].values) == 1:
-			t0values = t0values[numpy.newaxis, :]
-		elif len(Y.coords[dim2].values) == 1:
-			t0values = t0values[:, numpy.newaxis]
+        if isinstance(t0values, float):
+            t0values = numpy.array(t0values)
+            t0values = t0values[:, numpy.newaxis]
+        elif len(Y.coords[dim1].values) == 1:
+            t0values = t0values[numpy.newaxis, :]
+        elif len(Y.coords[dim2].values) == 1:
+            t0values = t0values[:, numpy.newaxis]
 
-		pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan)]
-		return pairs
+        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan)]
+        return pairs
 
 class GCMData:
-	def __init__(self, data):
-		self.data = data		
+    def __init__(self, data):
+        self.data = data
 
-	def get_X(self, timedim='time'):
-		import config
-		x = []
-		for var in config.gcmvars:
-			self.data[var].load()
-			df = self.data[var].to_array().to_dataframe()
-			levels = sorted([v for v in df.index.names if v != timedim])
-			x.append(df.unstack(levels).values)
+    def get_X(self, timedim='time', season=None):
+        import config
+        x = []
+        for var in config.gcmvars:
+            self.data[var].load()
+            df = self.data[var].to_array().to_dataframe()
+            levels = sorted([v for v in df.index.names if v != timedim])
+            x.append(df.unstack(levels).values)
+        x = numpy.column_stack(x)
+        if season is not None:
+            key0 = config.gcmvars[0]
+            seasonidxs = numpy.where(self.data[key0]['time.season']== season)[0]
+            x = x[seasonidxs, :]
 
-		x = numpy.column_stack(x)
-		return x
+        return x
 
 def get_reanalysis_file_paths(basedir):
     files = []
@@ -149,7 +152,7 @@ def read_nc_files(dir, bounds=None):
 
     files = get_reanalysis_file_paths(dir)
     if len(files) > 1:
-        data = xray.open_mfdataset(files[30:33], preprocess=lambda d: assert_bounds(d, bounds))
+        data = xray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
     elif len(files) == 1:
         data = xray.open_dataset(files[0])
     else:
@@ -208,9 +211,11 @@ def read_lowres_data(how='MS', which='reanalysis'):
     if which == 'reanalysis':
         vars = config.reanalysisvars
         basedir = config.reanalysis_dir
+        baselevels = config.reanalysislevels
     elif which == 'gcm':
         vars = config.gcmvars
         basedir = config.gcm_dir
+        baselevels = config.gcmlevels
 
     lowres = {} 
     for v in vars:
@@ -218,23 +223,20 @@ def read_lowres_data(how='MS', which='reanalysis'):
         if len(fv) == 0:
             continue
 
-        d = xray.open_mfdataset(fv[:3], preprocess=lambda d: assert_bounds(d, config.lowres_bounds))
-        print "loading"
+        d = xray.open_mfdataset(fv, preprocess=lambda d: assert_bounds(d, config.lowres_bounds))
         d.load()
         levs = set(d.dims.keys()).intersection(set(('lev', 'plev', 'level')))
         if len(levs) >  1:
             raise(Exception("What level to use?" + str(levs)))
         elif len(levs) == 0:
             lowres[v] = d
-            continue
         else:
             lev = levs.pop()
-        
-        levels = [l for l in config.reanalysislevels if l in d[lev].values]
-        if len(levels) > 0:
-            d = d.loc[{lev: levels}]
+            levels = [l for l in baselevels if l in d[lev].values]
+            if len(levels) > 0:
+                d = d.loc[{lev: levels}]
 
-        d.rename({lev: 'plev'}, inplace=True)
+            d.rename({lev: 'plev'}, inplace=True)
 
         if 'time_bnds' in d.keys():
             del d['time_bnds']
@@ -250,6 +252,8 @@ def read_obs(how='MS'):
     import config
     obs = read_nc_files(config.obs_dir, config.highres_bounds)
     obs.load()
+    prcp = obs.loc[{'latitude': 42.125, 'longitude': 288.125}].prcp.values
+    print numpy.histogram(prcp.flatten())
     obs.time = pandas.to_datetime(obs.time.values)
     obs = obs.resample('MS', dim='time', how='mean')
     return obs
@@ -279,15 +283,17 @@ if __name__ == "__main__":
     import config
     import pickle
     
-#    test_transformation()
-#    sys.exit()
-
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how='MS')
     print "reading observations"
     obs = read_obs(how='obs')
+    obs = obs.mean(dim='z')
+    prcp = obs.loc[{'latitude': 42.125, 'longitude': 288.125}].prcp.values
+    print numpy.histogram(prcp.flatten())
+
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
+    print "Number of Tasks:", len(D.location_pairs("latitude", "longitude"))
     print "Shape of X:", X.shape
     fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)

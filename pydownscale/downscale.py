@@ -17,7 +17,8 @@ class DownscaleModel:
         self.model = model
         self.season = season
         if self.season:
-            self.seasonidxs = numpy.where(self.data.ncep[0]['time.season'] == self.season)[0]
+            key0 = self.data.reanalysis.keys()[0]
+            self.seasonidxs = numpy.where(self.data.reanalysis[key0]['time.season'] == self.season)[0]
 
         self._split_dataset(training_size, feature_columns=feature_columns)
 
@@ -101,6 +102,9 @@ class DownscaleModel:
 
         return results
 
+    def predict(self, X):
+        pass
+
 
 if __name__ == "__main__":
     import pandas
@@ -108,7 +112,7 @@ if __name__ == "__main__":
     import time
     t0 = time.time()
 
-    cmip5_dir = "/Users/tj/data/ncep_ncar_monthly/"
+    cmip5_dir = "/Users/tj/data/reanalysis_ncar_monthly/"
     cpc_dir = "/Users/tj/data/usa_cpc_nc/merged/"
 
     # climate model data, monthly
