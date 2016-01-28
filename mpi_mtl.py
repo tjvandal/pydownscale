@@ -4,7 +4,7 @@ local testing command:
 mpirun -np 2 python mpi_linearregression.py --ncep_dir /Users/tj/data/ncep/access1-3/ --cpc_dir /Users/tj/data/usa_cpc_nc/merged/
 '''
 import sys
-sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
+sys.path.insert(0, "/home/vandal.t/anaconda2/lib/python2.7/site-packages")
 
 from mpi4py import MPI
 from scipy.stats import pearsonr, spearmanr, kendalltau
@@ -26,9 +26,9 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-data = pickle.load(open('/scratch/vandal.t/experiments/DownscaleData/monthly_804_420.pkl')) 
-pairs = data.location_pairs('lat', 'lon')
 
+data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/monthly_372_7657.pkl','r')) 
+pairs = data.location_pairs('latitude', 'longitude')
 
 seasons = ['DJF', 'MAM', 'JJA', 'SON']
 alphas = numpy.logspace(numpy.log10(0.001), numpy.log10(10),

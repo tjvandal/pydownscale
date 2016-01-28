@@ -39,7 +39,7 @@ class pMSSL:
         self.mpicomm = mpicomm
         self.mpiroot = mpiroot
 
-    def fit(self, X, y, epsomega=1e-2 ,epsw=5e-1):
+    def fit(self, X, y, epsomega=5e-1, epsw=5e-1):
         start_time = time.time()
         X, y, self.y_min, self.y_max, self.X_frob = center_data(X, y)
         Xy = X.T.dot(y)
@@ -88,9 +88,9 @@ class pMSSL:
 
             # Print stuff?
             if not self.quiet:
-                print "Iteration %i, w zeros: %i, omega zeros: %i" % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0))
-                print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "Rank:",
-                self.mpicomm.Get_rank()
+                if (self.walgo == 'mpi') and (self.mpicomm.Get_rank() == self.mpiroot):
+                    print "Iteration %i, w zeros: %i, omega zeros: %i" % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0))
+                    print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "Rank:", self.mpicomm.Get_rank()
 
             # 24 Hours is almost up
             if (time.time() - start_time) > (20. * 60 * 60):

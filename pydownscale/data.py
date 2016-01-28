@@ -63,7 +63,7 @@ class DownscaleData:
     def get_X(self, timedim='time'):
         import config
         x = []
-        for var in self.reanalysisvars: # this order is important
+        for var in config.reanalysisvars:
             self.reanalysis[var].load()
             df = self.reanalysis[var].to_array().to_dataframe()
             levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
