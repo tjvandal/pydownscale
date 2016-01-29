@@ -8,7 +8,7 @@ from downscale import DownscaleModel
 import sys
 from scipy.linalg import solve_sylvester
 import time
-from utils import center_data
+import utils
 import mpi_utils 
 EPSABS = 1e-2
 EPSREL = 1e-4
@@ -41,7 +41,9 @@ class pMSSL:
 
     def fit(self, X, y, epsomega=5e-1, epsw=5e-1):
         start_time = time.time()
-        X, y, self.y_min, self.y_max, self.X_frob = center_data(X, y)
+        X, self.X_frob = utils.center_frob(X)
+        y, self.lmbda = utils.center_boxcox(y)
+
         Xy = X.T.dot(y)
         # Store the number of tasks, samples, and dimensions
         self.K = y.shape[1]
@@ -89,8 +91,9 @@ class pMSSL:
             # Print stuff?
             if not self.quiet:
                 if (self.walgo == 'mpi') and (self.mpicomm.Get_rank() == self.mpiroot):
-                    print "Iteration %i, w zeros: %i, omega zeros: %i" % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0))
-                    print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "Rank:", self.mpicomm.Get_rank()
+                    print "Iteration %i, w zeros: %i, omega zeros: %i, lambda: %2.4f, gamma: %2.4f"  % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0),
+                       self.lambd, self.gamma)
+                    #print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "Rank:", self.mpicomm.Get_rank()
 
             # 24 Hours is almost up
             if (time.time() - start_time) > (20. * 60 * 60):
@@ -110,7 +113,12 @@ class pMSSL:
 
     def predict(self, X):
         X = X.dot(self.X_frob)
-        yhat = X.dot(self.W.values)  * (self.y_max - self.y_min) + self.y_min
+        yhat = X.dot(self.W.values)
+        if len(yhat.shape) == 2:
+            for i in range(yhat.shape[1]):
+                yhat[:,i] = (yhat[:,i]*self.lmbda[i] + 1) ** (1/self.lmbda[i])
+        elif len(yhat.shape == 1):
+            yhat = (yhat * self.lmbda + 1)**(1/self.lmbda)
         return yhat
 
 class WFista:
