@@ -27,7 +27,7 @@ def softthreshold(X, thres):
 class pMSSL:
     def __init__(self, max_epochs=1000, quiet=True, lambd=1e-3, 
         gamma=1e-3, walgo='admm', omega_epochs=100, w_epochs=100, 
-        rho=1., mpicomm=None, mpiroot=None):
+        rho=1., mpicomm=None, mpiroot=None, ytransform='log'):
         self.lambd = float(lambd)
         self.max_epochs = max_epochs
         self.quiet = quiet
@@ -38,13 +38,18 @@ class pMSSL:
         self.rho = rho
         self.mpicomm = mpicomm
         self.mpiroot = mpiroot
+        self.ytransform = ytransform
 
-    def fit(self, X, y, epsomega=5e-1, epsw=5e-1):
+    def fit(self, X, y, epsomega=5e-2, epsw=5e-2):
         start_time = time.time()
         X, self.X_frob = utils.center_frob(X)
-        y, self.lmbda = utils.center_boxcox(y)
-
+        self.shifty = 0
+        if self.ytransform == 'log':
+            y, self.y_mean, self.y_std = utils.center_log(y)
+        else:
+            raise ValueError("I don't know how to transform y")
         Xy = X.T.dot(y)
+
         # Store the number of tasks, samples, and dimensions
         self.K = y.shape[1]
         self.n = y.shape[0]
@@ -71,7 +76,8 @@ class pMSSL:
         for t in range(self.max_epochs):
             # Update W
             self.W.update(X, y, Omega=self.Omega.values)
-            self.mpicomm.Barrier()
+            if self.walgo == 'mpi':
+                self.mpicomm.Barrier()
             WList.append(self.W.values.copy())
 
             # Update Omega
@@ -98,7 +104,8 @@ class pMSSL:
             # 24 Hours is almost up
             if (time.time() - start_time) > (20. * 60 * 60):
                 break
-            self.mpicomm.Barrier()
+            if self.walgo == 'mpi':
+                self.mpicomm.Barrier()
 
         minutes = (time.time() - start_time) / 60.
         print "Gamma: %0.4f, Lambda: %0.4f, Converged in %i iterations, %2.3f Minutes" % (self.gamma, self.lambd, t, minutes)
@@ -114,11 +121,16 @@ class pMSSL:
     def predict(self, X):
         X = X.dot(self.X_frob)
         yhat = X.dot(self.W.values)
-        if len(yhat.shape) == 2:
-            for i in range(yhat.shape[1]):
-                yhat[:,i] = (yhat[:,i]*self.lmbda[i] + 1) ** (1/self.lmbda[i])
-        elif len(yhat.shape == 1):
-            yhat = (yhat * self.lmbda + 1)**(1/self.lmbda)
+        yhat = yhat * self.y_std + self.y_mean
+        if self.ytransform == 'boxcox':
+            if len(yhat.shape) == 2:
+                for i in range(yhat.shape[1]):
+                    yhat[:,i] = (yhat[:,i]*self.lmbda[i] + 1) ** (1/self.lmbda[i])
+            elif len(yhat.shape == 1):
+                yhat = (yhat * self.lmbda + 1)**(1/self.lmbda)
+            yhat -= self.shifty
+        elif self.ytransform == 'log':
+            yhat = numpy.exp(yhat)
         return yhat
 
 class WFista:
@@ -345,7 +357,6 @@ class WADMM:
     def update(self, X, y, Omega):
         # save the previous W
         self.prev_w = self.values.copy()
-
         # Initialize Updates
         Theta = self.values.copy()      # dxk
         Z = self.values.copy()  ## warm start

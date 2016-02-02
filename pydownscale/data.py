@@ -76,13 +76,14 @@ class DownscaleData:
             y = self.observations.loc[location].to_array().values.squeeze()
         else:
             y = self.observations.to_array().to_dataframe()
-            levels = [var for var in y.index.names if var != timedim]
+            levels =sorted([var for var in y.index.names if var != timedim])
             y = y.unstack(levels)
             location = y.columns.to_series()
             y = y.values
-            cols = y[0,:] != -999.
-            y = y[:, cols]
-            location = location[cols]
+            nanvals = numpy.isnan(y)
+            notcols = numpy.any(nanvals, axis=0)
+            y = y[:,~notcols]
+            location = location[~notcols]
         return y, location
 
     def location_pairs(self, dim1, dim2):
@@ -154,7 +155,7 @@ def read_nc_files(dir, bounds=None):
     if len(files) > 1:
         data = xray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
     elif len(files) == 1:
-        data = xray.open_dataset(files[0])
+        data = xray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
     else:
         raise IOError("There are no .nc files in that directory.")
     return data
@@ -252,10 +253,8 @@ def read_obs(how='MS'):
     import config
     obs = read_nc_files(config.obs_dir, config.highres_bounds)
     obs.load()
-    prcp = obs.loc[{'latitude': 42.125, 'longitude': 288.125}].prcp.values
-    print numpy.histogram(prcp.flatten())
     obs.time = pandas.to_datetime(obs.time.values)
-    obs = obs.resample('MS', dim='time', how='mean')
+    obs = obs.resample(how, dim='time', how='mean')
     return obs
 
 def test_transformation():
@@ -286,14 +285,11 @@ if __name__ == "__main__":
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how='MS')
     print "reading observations"
-    obs = read_obs(how='obs')
-    obs = obs.mean(dim='z')
-    prcp = obs.loc[{'latitude': 42.125, 'longitude': 288.125}].prcp.values
-    print numpy.histogram(prcp.flatten())
+    obs = read_obs(how='MS')  # we are in mm
 
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
-    print "Number of Tasks:", len(D.location_pairs("latitude", "longitude"))
+    print "Number of Tasks:", len(D.location_pairs("lat", "lon"))
     print "Shape of X:", X.shape
     fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)
