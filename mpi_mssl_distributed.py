@@ -66,8 +66,8 @@ data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/mo
 total_feature_count = data.get_X().shape[1]
 
 seasons = ['DJF', 'MAM', 'JJA', 'SON']
-lambda_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(1e0), num=5)
-gamma_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(1e1), num=5)
+lambda_range = numpy.logspace(numpy.log10(1e-6), numpy.log10(1e-5), num=2)
+gamma_range = numpy.logspace(numpy.log10(1e-6), numpy.log10(1e-5), num=2)
 
 seasons = ['SON']
 #gamma_range=[1e-8]
@@ -77,10 +77,10 @@ params = numpy.array([[g, l, s] for g in gamma_range for l in lambda_range for s
 params = numpy.array_split(params, num_groups)
 params = params[mygroupidx] 
 
-model_costs = []
-model_results = []
 for i, (g, l, seas) in enumerate(params):
     print "Rank: %i, Gamma: %s, Lambda: %s, Season: %s" % (rank, str(g), str(l), str(seas))	
+    model_costs = []
+    model_results = []
     model = pMSSL(max_epochs=epochs, gamma=float(g), lambd=float(l), 
         quiet=False, omega_epochs=omega_epochs, w_epochs=w_epochs, walgo='mpi', mpicomm=mygroupcomm,
                mpiroot=0)
@@ -97,23 +97,24 @@ for i, (g, l, seas) in enumerate(params):
         res = dmodel.get_results(test_set=False)
         print "Omega Zeros: %i, W Zeros: %i" % ((dmodel.model.Omega.values == 0).sum(), (dmodel.model.W.values == 0).sum()) 
         print "Model Average Rmse: %f, Gamma: %s, Lambda: %s, Season: %s" % (numpy.mean([r['rmse'] for r in res]), g, l, seas)
-        for r in res:
+        for i, r in enumerate(res):
             r['gamma'] = g
             r['lambd'] = l
-            r['omega'] = dmodel.model.Omega.values
-            r['W'] = dmodel.model.W.values
+            if i == 0:
+                r['omega'] = dmodel.model.Omega.values
+                r['W'] = dmodel.model.W.values
             model_results.append(r)
+
+    data = pandas.DataFrame(model_results)
+    data.to_pickle("mssl-results/mssl_downscale_results_US_%i_%s_%s_%2.4f_%2.4f.pkl" % (epochs,
+                                                                                     timestr,
+                                                                                        season, g, l))
+    del data
+
 print "Got results from group number", mygroupidx
 
 if rank == rootrank:
     data = pandas.DataFrame(model_results)
     data.to_pickle("mssl-results/mssl_downscale_results_US_%i_%s_%i.pkl" % (epochs, timestr, mygroupidx))
-
-sys.exit()
-
-if rank == 0:
-	print "Attempting to gather Results"
-	results = [r for res in model_results for r in res]
-	data = pandas.DataFrame(results)
-	data.to_pickle("mssl-results/mssl_US_%i_%s.pkl" % (epochs, timestr))
+    del data
 
