@@ -9,22 +9,23 @@ sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
 
 import numpy
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 from matplotlib import pyplot
-from rMSSL import pMSSL
+from MSSL import pMSSL
 import time
 from sklearn.utils.extmath import cartesian
 import pandas
 import pickle
 from data import DownscaleData
 from downscale import DownscaleModel
+from scipy.stats import pearsonr
 
 def test1_data():
     numpy.random.seed(0)
     t0 = time.time()
     n = 100
-    d = 200
-    k = 9
+    d = 4000
+    k = 362
     W = numpy.random.normal(size=(d, k))
     rows1 = numpy.random.choice(range(d), 50)
     rows2 = numpy.random.choice(range(d), 50)
@@ -32,9 +33,8 @@ def test1_data():
     W[rows1, :3] += numpy.random.normal(0, 2, size=(len(rows1), 1))
     W[rows2, 5:] += numpy.random.normal(0, 2, size=(len(rows2), 1))
 
-    X = numpy.random.uniform(-1, 1, size=(n, d))
-    X = X.dot(numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0))))
-    y = X.dot(W) + numpy.random.normal(0, 0.01, size=(n, k))
+    X = numpy.random.uniform(0, 1, size=(n, d))
+    y = X.dot(W) + numpy.random.normal(0, 1, size=(n, k))
     return X, y, W
 
 def test1_mpi():
@@ -84,15 +84,36 @@ def test1():
     X, y, W = test1_data()
     print "X shape", X.shape, " Y shape:", y.shape
     ntrain = int(y.shape[0]*0.80)
-    g, l = 1e-3, 1e-4
+    g, l = 1e-2, 1e-2
     print "mssl"
-    mssl = pMSSL(max_epochs=1000, quite=True, gamma=g, lambd=l)
+    mssl = pMSSL(max_epochs=100, quiet=False, gamma=g, lambd=l, 
+        walgo='mpi', w_epochs=50, omega_epochs=100)
     mssl.fit(X[:ntrain], y[:ntrain])
     yhat = mssl.predict(X[ntrain:])
+    p = numpy.mean([pearsonr(y[ntrain:,i], yhat[:, i])[0] for i in range(yhat.shape[1])])
     mse = numpy.mean((yhat - y[ntrain:])**2)
     num_omega_zeros = numpy.sum(mssl.Omega == 0)
     num_w_zeros = numpy.sum(mssl.W == 0)
-    d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros}
+    d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros, "pearson": p}
+    #print mssl.W
+    print d
+
+def test_joblib():
+    X, y, W = test1_data()
+    print "X shape", X.shape, " Y shape:", y.shape
+    ntrain = int(y.shape[0]*0.80)
+    g, l = 1e-2, 1e-2
+    print "mssl"
+    mssl = pMSSL(max_epochs=100, quiet=False, gamma=g, lambd=l, 
+        walgo='multiprocessor', w_epochs=51, omega_epochs=100, num_proc=48,
+                ytransform=None)
+    mssl.fit(X[:ntrain], y[:ntrain])
+    yhat = mssl.predict(X[ntrain:])
+    p = numpy.mean([pearsonr(y[ntrain:,i], yhat[:, i])[0] for i in range(yhat.shape[1])])
+    mse = numpy.mean((yhat - y[ntrain:])**2)
+    num_omega_zeros = numpy.sum(mssl.Omega == 0)
+    num_w_zeros = numpy.sum(mssl.W == 0)
+    d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros, "pearson": p}
     #print mssl.W
     print d
 
@@ -112,6 +133,5 @@ def climate():
 
 if __name__ == "__main__":
     #climate()
-    #test1()
-    test1_mpi()
-
+    #test1()    test1_mpi()
+    test_joblib()
