@@ -95,6 +95,7 @@ class DownscaleData:
 
         t0 = Y['time'].values[0]
         t0array = self.observations.loc[dict(time=t0)].to_array()
+        t0array = self.observations.mean(dim='time').to_array()
 
         # check which dimension axes
         dims = t0array.dims
@@ -114,7 +115,8 @@ class DownscaleData:
         elif len(Y.coords[dim2].values) == 1:
             t0values = t0values[:, numpy.newaxis]
 
-        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan)]
+        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in
+                 enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan, 0)]
         return pairs
 
 class GCMData:
@@ -282,16 +284,18 @@ if __name__ == "__main__":
     import config
     import pickle
     
-    print "reading reanalysis"
-    reanalysis = read_lowres_data(which='reanalysis', how='MS')
-    print "reading observations"
-    obs = read_obs(how='MS')  # we are in mm
+    how = "MS"
 
+    print "reading reanalysis"
+    reanalysis = read_lowres_data(which='reanalysis', how=how)
+    print "reading observations"
+    obs = read_obs(how=how)  # we are in mm
+    print obs
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
     print "Number of Tasks:", len(D.location_pairs("lat", "lon"))
     print "Shape of X:", X.shape
-    fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
+    fname = "newengland_daily_%i_%i.pkl" % (X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)
     pickle.dump(D, open(f, 'w'))
     print "Saved for file: %s" % f
