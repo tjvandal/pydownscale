@@ -71,7 +71,7 @@ class DownscaleData:
         x = numpy.column_stack(x)
         return x
 
-    def get_y(self, location=None, timedim='time'):
+    def get_y(self, location=None, timedim='time', dim1='lat', dim2='lon'):
         if location is not None:
             y = self.observations.loc[location].to_array().values.squeeze()
         else:
@@ -80,10 +80,10 @@ class DownscaleData:
             y = y.unstack(levels)
             location = y.columns.to_series()
             y = y.values
-            nanvals = numpy.isnan(y)
-            notcols = numpy.any(nanvals, axis=0)
-            y = y[:,~notcols]
-            location = location[~notcols]
+            ycolmean = y.mean(axis=0)
+            cols = (ycolmean != -999.) * (ycolmean != 0.) * (~numpy.isnan(ycolmean))
+            y = y[:, cols]
+            location = location[cols]
         return y, location
 
     def location_pairs(self, dim1, dim2):
@@ -116,7 +116,7 @@ class DownscaleData:
             t0values = t0values[:, numpy.newaxis]
 
         pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in
-                 enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan, 0)]
+                 enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan, 0.)]
         return pairs
 
 class GCMData:
@@ -283,16 +283,16 @@ def test_transformation():
 if __name__ == "__main__":
     import config
     import pickle
-    
     how = "MS"
 
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how=how)
     print "reading observations"
     obs = read_obs(how=how)  # we are in mm
-    print obs
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
+    y, loc = D.get_y()
+
     print "Number of Tasks:", len(D.location_pairs("lat", "lon"))
     print "Shape of X:", X.shape
     fname = "newengland_daily_%i_%i.pkl" % (X.shape[0], X.shape[1])
