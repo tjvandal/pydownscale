@@ -9,7 +9,6 @@ import sys
 from scipy.linalg import solve_sylvester
 import time
 import utils
-import mpi_utils 
 from joblib import Parallel, delayed
 EPSABS = 1e-2
 EPSREL = 1e-4
