@@ -31,8 +31,31 @@ def center_boxcox(x, shift=0):
     x = (x - xmean) / xstd
     return x, lmbda, xmean, xstd
 
+class LogTransform():
+    def __init__(self):
+        pass
+
+    def fit(self,X):
+        if numpy.any(X < 0):
+            raise ValueError("Log Transform: All values must be greater than or equal to zero")
+        xlog = numpy.log(X+1e-10)
+        self.xmean = xlog.mean(axis=0)
+        self.xstd = xlog.std(axis=0)
+
+    def transform(self,X):
+        xlog = numpy.log(X+1e-10)
+        return (xlog - self.xmean)/self.xstd
+
+    def inverse_transform(self,X):
+        xinv = X*self.xstd + self.xmean
+        xinv = numpy.exp(xinv)-1e-10
+        return xinv
+
 if __name__ == "__main__":
     import numpy
-    x = numpy.random.uniform(size = (10,100))
-    y, l, ymean, ystd = center_boxcox(x)
-    print boxcox(x[:,1], 4.42169476)
+    x = numpy.random.lognormal(0, 1, size = (10,100))
+    trans = LogTransform()
+    trans.fit(x)
+    xtran = trans.transform(x)
+    xinvtran = trans.inverse_transform(xtran)
+

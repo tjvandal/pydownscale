@@ -62,7 +62,7 @@ for j, sub in enumerate(jobranks):
         break
 
 #data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/day_9862_780.pkl','r')) 
-data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/monthly_324_7657.pkl','r')) 
+data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_daily_12783_7657.pkl','r')) 
 total_feature_count = data.get_X().shape[1]
 
 seasons = ['DJF', 'MAM', 'JJA', 'SON']

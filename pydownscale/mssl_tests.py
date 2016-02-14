@@ -9,32 +9,55 @@ sys.path.insert(0, "/home/vandal.t/anaconda/lib/python2.7/site-packages")
 
 import numpy
 import matplotlib
-#matplotlib.use('Agg')
 from matplotlib import pyplot
-from rMSSL import pMSSL
+from MSSL import pMSSL
 import time
 from sklearn.utils.extmath import cartesian
 import pandas
 import pickle
 from data import DownscaleData
 from downscale import DownscaleModel
+from scipy.stats import pearsonr
+import scipy.sparse
 
 def test1_data():
     numpy.random.seed(0)
     t0 = time.time()
     n = 100
-    d = 200
-    k = 9
-    W = numpy.random.normal(size=(d, k))
+    d = 100
+    k = 30
+    W = numpy.random.normal(0, 0.2,size=(d,k))
+
     rows1 = numpy.random.choice(range(d), 50)
     rows2 = numpy.random.choice(range(d), 50)
 
     W[rows1, :3] += numpy.random.normal(0, 2, size=(len(rows1), 1))
-    W[rows2, 5:] += numpy.random.normal(0, 2, size=(len(rows2), 1))
+    W[rows2, 5:10] += numpy.random.normal(0, 2, size=(len(rows2), 1))
 
     X = numpy.random.uniform(-1, 1, size=(n, d))
     X = X.dot(numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0))))
-    y = X.dot(W) + numpy.random.normal(0, 0.01, size=(n, k))
+    y = X.dot(W) + numpy.random.normal(0, 1, size=(n, k))
+    return X, y, W
+
+def test_log_data():
+    numpy.random.seed(0)
+    t0 = time.time()
+    n = 100
+    d = 100
+    k = 30
+    W = numpy.random.normal(0, 0.2,size=(d,k))
+
+    rows1 = numpy.random.choice(range(d), 50)
+    rows2 = numpy.random.choice(range(d), 50)
+
+    W[rows1, :3] += numpy.random.normal(0, 2, size=(len(rows1), 1))
+    W[rows2, 5:10] += numpy.random.normal(0, 2, size=(len(rows2), 1))
+
+    X = numpy.random.uniform(-1, 1, size=(n, d))
+    X = X.dot(numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0))))
+    y = X.dot(W) + numpy.random.normal(0, 1, size=(n, k))
+    y = numpy.exp(y)
+    print y
     return X, y, W
 
 def test1_mpi():
@@ -84,16 +107,47 @@ def test1():
     X, y, W = test1_data()
     print "X shape", X.shape, " Y shape:", y.shape
     ntrain = int(y.shape[0]*0.80)
-    g, l = 1e-3, 1e-4
+    g, l = 1e-10, 1e10
     print "mssl"
-    mssl = pMSSL(max_epochs=1000, quite=True, gamma=g, lambd=l)
+    mssl = pMSSL(max_epochs=100, quiet=False, gamma=g, lambd=l, 
+        walgo='admm', w_epochs=50, omega_epochs=100, ytransform="log")
     mssl.fit(X[:ntrain], y[:ntrain])
     yhat = mssl.predict(X[ntrain:])
+    p = numpy.mean([pearsonr(y[ntrain:,i], yhat[:, i])[0] for i in range(yhat.shape[1])])
     mse = numpy.mean((yhat - y[ntrain:])**2)
     num_omega_zeros = numpy.sum(mssl.Omega == 0)
     num_w_zeros = numpy.sum(mssl.W == 0)
-    d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros}
+    d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros, "pearson": p}
     #print mssl.W
+    print d
+
+def test_joblib():
+    from sklearn.linear_model import Lasso
+    X, y, W = test_log_data()
+    print "X shape", X.shape, " Y shape:", y.shape
+    ntrain = int(y.shape[0]*0.80)
+    g, l = 1e-10, 1e10
+    
+    X_train = X[:ntrain]
+    X_test = X[ntrain:]
+    ytrain = y[:ntrain]
+    ytest = y[ntrain:]
+
+    print "MSSL"
+    mssl = pMSSL(max_epochs=25, quiet=False, gamma=g, lambd=l, 
+        walgo='multiprocessor', w_epochs=51, omega_epochs=100, num_proc=1,
+                ytransform="log", rho=1.)
+    mssl.fit(X_train, ytrain)
+    yhat = mssl.predict(X_train)
+    p = numpy.mean([pearsonr(ytrain[:,i], yhat[:,i])[0] for i in range(yhat.shape[1])])
+    mse = numpy.mean((yhat - ytrain)**2)
+    num_omega_zeros = numpy.sum(mssl.Omega == 0)
+    num_w_zeros = numpy.sum(mssl.W == 0)
+    d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros, "pearson": p}
+    pyplot.plot(yhat[:, 0])
+    pyplot.plot(ytrain[:, 0])
+    print "Trying to show plot"
+    pyplot.show()
     print d
 
 def climate():
@@ -112,6 +166,5 @@ def climate():
 
 if __name__ == "__main__":
     #climate()
-    #test1()
-    test1_mpi()
-
+    #test1()    test1_mpi()
+    test_joblib()

@@ -43,22 +43,26 @@ class DownscaleData:
 
 	# Line up datasets so that the times match.  Exclude observations outside of the timeframe.
     def _matchdates(self):
-		key1 = self.reanalysis.keys()[0]
-		mintime = max(self.reanalysis[key1].time.min(), self.observations.time.min())
-		maxtime = min(self.reanalysis[key1].time.max(), self.observations.time.max())
+        key1 = self.reanalysis.keys()[0]
+        mintime = max(self.reanalysis[key1].time.min(), self.observations.time.min())
+        maxtime = min(self.reanalysis[key1].time.max(), self.observations.time.max())
 
-		cmiptimes = (self.reanalysis[key1].time >= mintime) & (self.reanalysis[key1].time <= maxtime)
-		obstimes = (self.observations.time >= mintime) & (self.observations.time <= maxtime)
+        cmiptimes = (self.reanalysis[key1].time >= mintime) & (self.reanalysis[key1].time <= maxtime)
+        obstimes = (self.observations.time >= mintime) & (self.observations.time <= maxtime)
+        time_intersection = numpy.intersect1d(self.reanalysis[key1].time.values,
+                                              self.observations.time.values)
 
-		for key in self.reanalysis:
-			self.reanalysis[key] = self.reanalysis[key].loc[dict(time=self.reanalysis[key].time[cmiptimes])]
+        for key in self.reanalysis:
+            #self.reanalysis[key] = self.reanalysis[key].loc[dict(time=self.reanalysis[key].time[cmiptimes])]
+            self.reanalysis[key] = self.reanalysis[key].loc[dict(time=time_intersection)]
 
-		self.observations = self.observations.loc[dict(time=self.observations.time[obstimes])]
+        #self.observations = self.observations.loc[dict(time=self.observations.time[obstimes])]
+        self.observations = self.observations.loc[dict(time=time_intersection)]
 
-		if (len(self.reanalysis[key1].time) != len(self.observations.time)) or \
-				sum(self.reanalysis[key1].time == self.observations.time) != len(self.reanalysis[key1].time):
-				print self.reanalysis[key1].time, self.observations.time
-				raise IndexError("times do not match.  add functionality if this is not an error")
+        if (len(self.reanalysis[key1].time) != len(self.observations.time)) or \
+                sum(self.reanalysis[key1].time == self.observations.time) != len(self.reanalysis[key1].time):
+                print self.reanalysis[key1].time, self.observations.time
+                raise IndexError("times do not match.  add functionality if this is not an error")
 
     def get_X(self, timedim='time'):
         import config
@@ -71,7 +75,7 @@ class DownscaleData:
         x = numpy.column_stack(x)
         return x
 
-    def get_y(self, location=None, timedim='time'):
+    def get_y(self, location=None, timedim='time', dim1='lat', dim2='lon'):
         if location is not None:
             y = self.observations.loc[location].to_array().values.squeeze()
         else:
@@ -80,10 +84,17 @@ class DownscaleData:
             y = y.unstack(levels)
             location = y.columns.to_series()
             y = y.values
-            nanvals = numpy.isnan(y)
-            notcols = numpy.any(nanvals, axis=0)
-            y = y[:,~notcols]
-            location = location[~notcols]
+            ycolmean = y.mean(axis=0)
+            ybelow = (y >= 0).mean(axis=0)
+            # all columns must not be all zero, have a negative value, or have a nan value
+            #print numpy.where(y < 0)[0]
+            #print y[numpy.where(y<0)]
+            #print ybelow
+            idx = numpy.where(ybelow != 1)[0][-1]
+            idx2 = numpy.where(y[:, idx] == -999.)[0]
+            cols = (ycolmean !=0 ) * (ybelow == 1.) * (~numpy.isnan(ycolmean))
+            y = y[:, cols]
+            location = location[cols]
         return y, location
 
     def location_pairs(self, dim1, dim2):
@@ -95,6 +106,7 @@ class DownscaleData:
 
         t0 = Y['time'].values[0]
         t0array = self.observations.loc[dict(time=t0)].to_array()
+        t0array = self.observations.mean(dim='time').to_array()
 
         # check which dimension axes
         dims = t0array.dims
@@ -114,7 +126,8 @@ class DownscaleData:
         elif len(Y.coords[dim2].values) == 1:
             t0values = t0values[:, numpy.newaxis]
 
-        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan)]
+        pairs = [[d1, d2] for i1, d1 in enumerate(Y.coords[dim1].values) for i2, d2 in
+                 enumerate(Y.coords[dim2].values) if t0values[i1, i2] not in (-999., numpy.nan, 0.)]
         return pairs
 
 class GCMData:
@@ -281,17 +294,24 @@ def test_transformation():
 if __name__ == "__main__":
     import config
     import pickle
-    
+    how = "D"
+
     print "reading reanalysis"
-    reanalysis = read_lowres_data(which='reanalysis', how='MS')
+    reanalysis = read_lowres_data(which='reanalysis', how=how)
     print "reading observations"
-    obs = read_obs(how='MS')  # we are in mm
+    obs = read_obs(how=how)  # we are in mm
+    rows = ((obs == -999).mean(dim=('lat', 'lon'))['precip']) < 0.20    # delete those with lots of 999.s 
+    times = obs['time'][rows]
+    print "time skipped", obs['time'][~rows]
+    obs = obs.loc[{'time': times}]
 
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
+    y, loc = D.get_y()
+
     print "Number of Tasks:", len(D.location_pairs("lat", "lon"))
     print "Shape of X:", X.shape
-    fname = "monthly_%i_%i.pkl" % (X.shape[0], X.shape[1])
+    fname = "newengland_daily_%i_%i.pkl" % (X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)
     pickle.dump(D, open(f, 'w'))
     print "Saved for file: %s" % f

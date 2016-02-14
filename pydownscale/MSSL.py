@@ -9,7 +9,8 @@ import sys
 from scipy.linalg import solve_sylvester
 import time
 import utils
-import mpi_utils 
+from joblib import Parallel, delayed
+from sklearn import preprocessing
 EPSABS = 1e-2
 EPSREL = 1e-4
 
@@ -27,7 +28,7 @@ def softthreshold(X, thres):
 class pMSSL:
     def __init__(self, max_epochs=1000, quiet=True, lambd=1e-3, 
         gamma=1e-3, walgo='admm', omega_epochs=100, w_epochs=100, 
-        rho=1., mpicomm=None, mpiroot=None, ytransform='log'):
+        rho=1., mpicomm=None, mpiroot=None, ytransform='log', num_proc=1):
         self.lambd = float(lambd)
         self.max_epochs = max_epochs
         self.quiet = quiet
@@ -39,17 +40,22 @@ class pMSSL:
         self.mpicomm = mpicomm
         self.mpiroot = mpiroot
         self.ytransform = ytransform
+        self.num_proc = num_proc
 
-    def fit(self, X, y, epsomega=5e-2, epsw=5e-2):
+    def fit(self, X, y, epsomega=1e-3, epsw=1e-3):
         start_time = time.time()
         X, self.X_frob = utils.center_frob(X)
         self.shifty = 0
         if self.ytransform == 'log':
-            y, self.y_mean, self.y_std = utils.center_log(y)
+            self.scaler = utils.LogTransform()
+            self.scaler.fit(y)
+            y = self.scaler.transform(y)
+        elif self.ytransform is None:
+            self.scaler = preprocessing.StandardScaler(with_std=False).fit(y)
+            y = self.scaler.transform(y)
         else:
             raise ValueError("I don't know how to transform y")
         Xy = X.T.dot(y)
-
         # Store the number of tasks, samples, and dimensions
         self.K = y.shape[1]
         self.n = y.shape[0]
@@ -60,19 +66,26 @@ class pMSSL:
                 shape=(self.d, self.K), quiet=self.quiet)
 
         elif (self.walgo == 'mpi') and (not hasattr(self, 'W')):
-            self.W = WDistributed(rho=self.rho, gamma=self.gamma, 
+            self.W = WMPIDistributed(rho=self.rho, gamma=self.gamma, 
                 lambd=self.lambd, shape=(self.d, self.K), 
                 maxepoch=self.w_epochs, quiet=self.quiet,
                 mpicomm=self.mpicomm, root=self.mpiroot)
         elif (self.walgo == 'fista') and (not hasattr(self, 'W')):
             self.W = WFista(self.gamma, self.lambd, shape=(self.d, self.K), maxepochs=self.w_epochs, epscost=1e-4)
-
+        elif (self.walgo == 'multiprocessor') and (not hasattr(self, 'W')):
+            self.W = WADMMMultiProcessor(rho=self.rho, gamma=self.gamma, 
+                lambd=self.lambd, shape=(self.d, self.K), 
+                maxepoch=self.w_epochs, quiet=self.quiet,
+                num_proc=self.num_proc)
         if not hasattr(self, 'Omega'):
             self.Omega = OmegaADMM(rho=self.rho, gamma=self.gamma, lambd=self.lambd, K=self.K)
 
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
 
         WList = [self.W.values.copy()]
+        yhat = self.predict(X)
+        ytrue = y #*self.y_std + self.y_mean
+        mse = numpy.mean((ytrue - yhat)**2)
         for t in range(self.max_epochs):
             # Update W
             self.W.update(X, y, Omega=self.Omega.values)
@@ -95,11 +108,13 @@ class pMSSL:
                 break
 
             # Print stuff?
+            yhat = self.predict(X)
+            ytrue = self.scaler.inverse_transform(y)
+            mse = numpy.mean((ytrue - yhat)**2)
             if not self.quiet:
-                if (self.walgo == 'mpi') and (self.mpicomm.Get_rank() == self.mpiroot):
-                    print "Iteration %i, w zeros: %i, omega zeros: %i, lambda: %2.4f, gamma: %2.4f"  % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0),
+                print "FULL Iteration %i, w zeros: %i, omega zeros: %i, lambda: %2.4f, gamma: %2.4f"  % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0),
                        self.lambd, self.gamma)
-                    #print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "Rank:", self.mpicomm.Get_rank()
+                print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "\tMSE:", mse
 
             # 24 Hours is almost up
             if (time.time() - start_time) > (20. * 60 * 60):
@@ -121,16 +136,12 @@ class pMSSL:
     def predict(self, X):
         X = X.dot(self.X_frob)
         yhat = X.dot(self.W.values)
-        yhat = yhat * self.y_std + self.y_mean
-        if self.ytransform == 'boxcox':
-            if len(yhat.shape) == 2:
-                for i in range(yhat.shape[1]):
-                    yhat[:,i] = (yhat[:,i]*self.lmbda[i] + 1) ** (1/self.lmbda[i])
-            elif len(yhat.shape == 1):
-                yhat = (yhat * self.lmbda + 1)**(1/self.lmbda)
-            yhat -= self.shifty
-        elif self.ytransform == 'log':
-            yhat = numpy.exp(yhat)
+        if self.ytransform == 'log':
+           print "inverse transform log"
+           yhat = self.scaler.inverse_transform(yhat)
+           print "minimum", yhat[:, 0].min()
+        elif self.ytransform is None:
+           yhat = self.scaler.inverse_transform(yhat)
         return yhat
 
 class WFista:
@@ -228,7 +239,7 @@ class OmegaADMM:
 
         self.values = Z 
 
-class WDistributed:
+class WMPIDistributed:
     def __init__(self, lambd, gamma, shape, rho=1., 
                 maxepoch=100, maxepoch_inner=100, quiet=True, 
                 mpicomm=None, root=0):
@@ -383,19 +394,139 @@ class WADMM:
 
             # Confirm the dual is decreasing
             if (j > 0) and (prevdual < dualresid):
-                break
-
+                #break
+                pass
             prevdual = dualresid
-
             # Check for convergence
             if (dualresid < epsdual) and (primalresid < epspri):
                 break
 
             if not self.quiet:
-                print "Iteration: %i, Rho: %2.2f, Dualresid: %2.4f, EPS_Dual: %2.4f, PriResid: %2.4f, EPS_Pri: %2.4f" % (j, self.rho, dualresid, epsdual, primalresid, epspri)
+                print "Learning W, Iteration: %i, Rho: %2.2f, Dualresid: %2.4f, EPS_Dual: %2.4f, PriResid: %2.4f, EPS_Pri: %2.4f" % (j, self.rho, dualresid, epsdual, primalresid, epspri)
 
         self.values = Z
 
+#thetai = Theta[self.feat, :].copy()
+def compute_b(xi, thetai, Zbar, XWbar, U):
+    return xi.dot(thetai) + Zbar - XWbar - U
+
+class WADMMMultiProcessor:
+    def __init__(self, lambd, gamma, shape, rho=1., 
+                maxepoch=100, maxepoch_inner=100, quiet=True, 
+                mpicomm=None, root=0, num_proc=1):
+        self.lambd = lambd
+        self.gamma = gamma
+        self.rho = rho
+        self.maxepoch = maxepoch
+        self.maxepoch_inner = maxepoch_inner
+        self.quiet = quiet
+        self.values = numpy.zeros(shape=shape)
+        self.num_proc = num_proc
+        #self.mpicomm = mpicomm
+        #self.root = root 
+        self.size = num_proc # mpicomm.Get_size() 
+        #self.curr_rank = self.mpicomm.Get_rank()
+
+    def update(self, X, Y, Omega):
+        ## MPI SETTINGS
+        self.prev_w = self.values.copy()
+        nsamples, nfeatures = X.shape
+        _, ntasks = Y.shape
+        Theta = self.values.copy()
+        feature_split = numpy.array_split(numpy.arange(nfeatures), self.num_proc)
+        XWbar = self.XW_mean(X, Theta, feature_split)
+
+        if hasattr(self, 'Zbar_prev'):
+            Zbar = self.Zbar_prev
+        else:
+            Zbar = numpy.zeros(shape=Y.shape) #XWbar.copy() 
+        U = numpy.zeros(shape=Y.shape)
+
+
+        for k in range(self.maxepoch):
+            Zbar_prev = Zbar.copy()
+
+            # compute that update
+            bs = Parallel(n_jobs=self.num_proc)(
+                delayed(compute_b)(X[:,feat], Theta[feat,:], Zbar, XWbar, U) for feat in feature_split)
+            t0 = time.time()
+            temptheta = Parallel(n_jobs=self.num_proc)(
+                delayed(_w_update)(X[:, feat],Theta[feat,:], Omega=Omega, b=bs[i],
+                                   rho=self.rho, gamma=self.gamma, maxepochs=self.maxepoch_inner)
+                for i, feat in enumerate(feature_split))
+            Theta = numpy.vstack(temptheta)
+            print "W update time",time.time() - t0 
+            # Collect theta updates to root
+            yhat = X.dot(Theta) 
+            mse = numpy.mean((Y - yhat)**2)
+            print "MSE: %f" % mse
+            #theta_updates = self.mpicomm.gather([self.feat, thetai], root=self.root) 
+
+            # Compute Z and U updates
+            XWbar = self.XW_mean(X, Theta, feature_split)
+            temp = self.size * self.rho * (XWbar + U) + self.size*Y
+            Zbar = temp / (self.size**2 + self.rho * self.size)
+            U = U + XWbar - Zbar
+            ''' 
+            # Broadcast updates to all ranks
+            Theta = self.mpicomm.bcast(Theta, root=self.root)
+            XWbar = self.mpicomm.bcast(XWbar, root=self.root)
+            Zbar = self.mpicomm.bcast(Zbar, root=self.root)
+            U = self.mpicomm.bcast(U, root=self.root)
+            '''
+
+            # compute residuals and check for convergence
+            dualresid = numpy.linalg.norm(-self.rho * (Zbar - Zbar_prev), 'fro')
+            primalresid = numpy.linalg.norm(XWbar - Zbar, 'fro')
+            epspri = numpy.sqrt(nsamples*ntasks) * EPSABS   + EPSREL * numpy.nanmax([numpy.linalg.norm(XWbar, 'fro'), numpy.linalg.norm(Zbar, 'fro'), 0])
+            epsdual = numpy.sqrt(nsamples*ntasks) * EPSABS + EPSREL * numpy.linalg.norm(self.rho*U, 'fro')
+
+            if (not self.quiet): #  and (self.curr_rank == self.root):
+                print "Iteration %i, PrimalResid: %2.2f, EPSPRI: %2.2f, DualResid: %2.2f"\
+                "EPSDUAL: %2.2f" % (k, primalresid, epspri,  dualresid, epsdual)
+            if (epspri > primalresid) and (epsdual > dualresid):
+                break
+
+            if (k > 0) and (prevdual < dualresid):
+                break
+            prevdual = dualresid
+
+        self.Zbar_prev = Zbar_prev
+        self.values = Theta 
+
+    def XW_mean(self, X, W, feature_split):
+        temp = [X[:,features].dot(W[features,:]) for features in feature_split]
+        return reduce(numpy.add, temp) / self.size
+
+    def predict(self, X):
+        return X.dot(self.values)
+
+def _w_update(x, w, Omega, b, rho, gamma, maxepochs=50):
+    theta = w.copy()
+    n = x.shape[0]
+    z = w.copy() #numpy.zeros(shape=w.shape)
+    u = numpy.zeros(shape=w.shape)
+
+    # cache multiplications
+    xb = x.T.dot(b)
+    xx = x.T.dot(x)
+    for l in range(maxepochs):
+        zprev = z.copy()
+
+        # updates
+        theta = solve_sylvester(rho*xx + rho * numpy.eye(xx.shape[0]), 2*Omega, rho*xb + rho*(z-u))
+        z = softthreshold(theta + u, 1.*gamma/rho)
+        u = u + theta - z
+        # compute residuals
+        dualresid = numpy.linalg.norm(-rho * (z - zprev), 'fro')
+        primalresid = numpy.linalg.norm(theta - z, 'fro')
+        epspri = n * EPSABS  + EPSREL * numpy.max([numpy.linalg.norm(theta, 'fro'), numpy.linalg.norm(z, 'fro'), 0])
+        epsdual = n * EPSABS + EPSREL * numpy.linalg.norm(rho*u, 'fro')
+        # check for convergence 
+        if (dualresid < epsdual) and (primalresid < epspri):
+            break
+
+    return z
 
 if __name__ == "__main__":
     from mssl_tests import test1
