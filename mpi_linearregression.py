@@ -29,9 +29,9 @@ size = comm.Get_size()
 rank = comm.Get_rank()
 
 
-data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/monthly_372_7657.pkl','r')) 
 
-pairs = data.location_pairs('latitude', 'longitude')
+data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/monthly_324_7657.pkl','r')) 
+pairs = data.location_pairs('lat', 'lon')
 seasons = ['DJF', 'MAM', 'JJA', 'SON']
 models = [
 #          LinearRegression(normalize=True),
@@ -61,7 +61,7 @@ for model,season, p in params:
     try:
         t0 = time.time()
         dmodel = DownscaleModel(data, model, season=season)
-        dmodel.train(location={'latitude': p[0], 'longitude': p[1]})
+        dmodel.train(location={'lat': p[0], 'lon': p[1]})
         #pickle.dump(dmodel, open("%s_%2.2d_%2.2f_%s" % (model.__class__.__name__, p[0],
         #                                                p[1],season),'w')) 
         res = dmodel.get_results()
@@ -70,6 +70,7 @@ for model,season, p in params:
           print "Rank: %i, Training Time: %3.2f" % (rank, r['time_to_execute'])
           results.append(r)
     except Exception as err:
+        print err
         print "Error:", p, model.__class__.__name__, season, err
 
 print "Rank: %i, Attempting to gather" % rank
