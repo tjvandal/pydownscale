@@ -10,6 +10,7 @@ from scipy.linalg import solve_sylvester
 import time
 import utils
 from joblib import Parallel, delayed
+from sklearn import preprocessing
 EPSABS = 1e-2
 EPSREL = 1e-4
 
@@ -41,18 +42,21 @@ class pMSSL:
         self.ytransform = ytransform
         self.num_proc = num_proc
 
-    def fit(self, X, y, epsomega=5e-2, epsw=5e-2):
+    def fit(self, X, y, epsomega=1e-3, epsw=1e-3):
         start_time = time.time()
         X, self.X_frob = utils.center_frob(X)
+        self.scaler = preprocessing.StandardScaler(with_std=False).fit(y)
         self.shifty = 0
         if self.ytransform == 'log':
-            y, self.y_mean, self.y_std = utils.center_log(y)
+            self.yscale = utils.LogTransform()
+            self.yscale.fit(y)
+            y = self.scaler.transform(y)
         elif self.ytransform is None:
-            pass
+            y = self.scaler.transform(y)
+            pass 
         else:
             raise ValueError("I don't know how to transform y")
         Xy = X.T.dot(y)
-
         # Store the number of tasks, samples, and dimensions
         self.K = y.shape[1]
         self.n = y.shape[0]
@@ -80,6 +84,9 @@ class pMSSL:
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
 
         WList = [self.W.values.copy()]
+        yhat = self.predict(X)
+        ytrue = y #*self.y_std + self.y_mean
+        mse = numpy.mean((ytrue - yhat)**2)
         for t in range(self.max_epochs):
             # Update W
             self.W.update(X, y, Omega=self.Omega.values)
@@ -102,11 +109,13 @@ class pMSSL:
                 break
 
             # Print stuff?
+            yhat = self.predict(X)
+            ytrue = self.scaler.inverse_transform(y)
+            mse = numpy.mean((ytrue - yhat)**2)
             if not self.quiet:
-                if (self.walgo == 'mpi') and (self.mpicomm.Get_rank() == self.mpiroot):
-                    print "Iteration %i, w zeros: %i, omega zeros: %i, lambda: %2.4f, gamma: %2.4f"  % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0),
+                print "FULL Iteration %i, w zeros: %i, omega zeros: %i, lambda: %2.4f, gamma: %2.4f"  % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0),
                        self.lambd, self.gamma)
-                    #print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "Rank:", self.mpicomm.Get_rank()
+                print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "\tMSE:", mse
 
             # 24 Hours is almost up
             if (time.time() - start_time) > (20. * 60 * 60):
@@ -129,10 +138,9 @@ class pMSSL:
         X = X.dot(self.X_frob)
         yhat = X.dot(self.W.values)
         if self.ytransform == 'log':
-            yhat = yhat * self.y_std + self.y_mean
-            yhat = numpy.exp(yhat)
+           yhat = self.scaler.inverse_transform(yhat)
         elif self.ytransform is None:
-            pass
+           yhat = self.scaler.inverse_transform(yhat)
         return yhat
 
 class WFista:
@@ -385,24 +393,21 @@ class WADMM:
 
             # Confirm the dual is decreasing
             if (j > 0) and (prevdual < dualresid):
-                break
-
+                #break
+                pass
             prevdual = dualresid
-
             # Check for convergence
             if (dualresid < epsdual) and (primalresid < epspri):
                 break
 
             if not self.quiet:
-                print "Iteration: %i, Rho: %2.2f, Dualresid: %2.4f, EPS_Dual: %2.4f, PriResid: %2.4f, EPS_Pri: %2.4f" % (j, self.rho, dualresid, epsdual, primalresid, epspri)
+                print "Learning W, Iteration: %i, Rho: %2.2f, Dualresid: %2.4f, EPS_Dual: %2.4f, PriResid: %2.4f, EPS_Pri: %2.4f" % (j, self.rho, dualresid, epsdual, primalresid, epspri)
 
         self.values = Z
-
 
 #thetai = Theta[self.feat, :].copy()
 def compute_b(xi, thetai, Zbar, XWbar, U):
     return xi.dot(thetai) + Zbar - XWbar - U
-
 
 class WADMMMultiProcessor:
     def __init__(self, lambd, gamma, shape, rho=1., 
@@ -451,16 +456,16 @@ class WADMMMultiProcessor:
             Theta = numpy.vstack(temptheta)
             print "W update time",time.time() - t0 
             # Collect theta updates to root
+            yhat = X.dot(Theta) 
+            mse = numpy.mean((Y - yhat)**2)
+            print "MSE: %f" % mse
             #theta_updates = self.mpicomm.gather([self.feat, thetai], root=self.root) 
 
-            if True:# self.curr_rank == self.root:
-
-                # Compute Z and U updates
-                XWbar = self.XW_mean(X, Theta, feature_split)
-                temp = self.size * self.rho * (XWbar + U) + self.size*Y
-                Zbar = temp / (self.size**2 + self.rho * self.size)
-                U = U + XWbar - Zbar
-
+            # Compute Z and U updates
+            XWbar = self.XW_mean(X, Theta, feature_split)
+            temp = self.size * self.rho * (XWbar + U) + self.size*Y
+            Zbar = temp / (self.size**2 + self.rho * self.size)
+            U = U + XWbar - Zbar
             ''' 
             # Broadcast updates to all ranks
             Theta = self.mpicomm.bcast(Theta, root=self.root)
@@ -472,7 +477,7 @@ class WADMMMultiProcessor:
             # compute residuals and check for convergence
             dualresid = numpy.linalg.norm(-self.rho * (Zbar - Zbar_prev), 'fro')
             primalresid = numpy.linalg.norm(XWbar - Zbar, 'fro')
-            epspri = numpy.sqrt(nsamples*ntasks) * EPSABS   + EPSREL * numpy.max([numpy.linalg.norm(XWbar, 'fro'), numpy.linalg.norm(Zbar, 'fro'), 0])
+            epspri = numpy.sqrt(nsamples*ntasks) * EPSABS   + EPSREL * numpy.nanmax([numpy.linalg.norm(XWbar, 'fro'), numpy.linalg.norm(Zbar, 'fro'), 0])
             epsdual = numpy.sqrt(nsamples*ntasks) * EPSABS + EPSREL * numpy.linalg.norm(self.rho*U, 'fro')
 
             if (not self.quiet): #  and (self.curr_rank == self.root):
@@ -516,7 +521,6 @@ def _w_update(x, w, Omega, b, rho, gamma, maxepochs=50):
         primalresid = numpy.linalg.norm(theta - z, 'fro')
         epspri = n * EPSABS  + EPSREL * numpy.max([numpy.linalg.norm(theta, 'fro'), numpy.linalg.norm(z, 'fro'), 0])
         epsdual = n * EPSABS + EPSREL * numpy.linalg.norm(rho*u, 'fro')
-
         # check for convergence 
         if (dualresid < epsdual) and (primalresid < epspri):
             break

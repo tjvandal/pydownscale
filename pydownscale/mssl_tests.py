@@ -11,6 +11,7 @@ import numpy
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot
+from rMSSL import rMSSL
 from MSSL import pMSSL
 import time
 from sklearn.utils.extmath import cartesian
@@ -19,21 +20,24 @@ import pickle
 from data import DownscaleData
 from downscale import DownscaleModel
 from scipy.stats import pearsonr
+import scipy.sparse
 
 def test1_data():
     numpy.random.seed(0)
     t0 = time.time()
     n = 100
-    d = 4000
-    k = 362
-    W = numpy.random.normal(size=(d, k))
+    d = 100
+    k = 30
+    W = numpy.random.normal(0, 0.2,size=(d,k))
+
     rows1 = numpy.random.choice(range(d), 50)
     rows2 = numpy.random.choice(range(d), 50)
 
     W[rows1, :3] += numpy.random.normal(0, 2, size=(len(rows1), 1))
-    W[rows2, 5:] += numpy.random.normal(0, 2, size=(len(rows2), 1))
+    W[rows2, 5:10] += numpy.random.normal(0, 2, size=(len(rows2), 1))
 
-    X = numpy.random.uniform(0, 1, size=(n, d))
+    X = numpy.random.uniform(-1, 1, size=(n, d))
+    X = X.dot(numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0))))
     y = X.dot(W) + numpy.random.normal(0, 1, size=(n, k))
     return X, y, W
 
@@ -84,10 +88,10 @@ def test1():
     X, y, W = test1_data()
     print "X shape", X.shape, " Y shape:", y.shape
     ntrain = int(y.shape[0]*0.80)
-    g, l = 1e-2, 1e-2
+    g, l = 1e-10, 1e10
     print "mssl"
     mssl = pMSSL(max_epochs=100, quiet=False, gamma=g, lambd=l, 
-        walgo='mpi', w_epochs=50, omega_epochs=100)
+        walgo='admm', w_epochs=50, omega_epochs=100, ytransform="log")
     mssl.fit(X[:ntrain], y[:ntrain])
     yhat = mssl.predict(X[ntrain:])
     p = numpy.mean([pearsonr(y[ntrain:,i], yhat[:, i])[0] for i in range(yhat.shape[1])])
@@ -99,24 +103,32 @@ def test1():
     print d
 
 def test_joblib():
+    from sklearn.linear_model import Lasso
     X, y, W = test1_data()
     print "X shape", X.shape, " Y shape:", y.shape
     ntrain = int(y.shape[0]*0.80)
-    g, l = 1e-2, 1e-2
-    print "mssl"
-    mssl = pMSSL(max_epochs=100, quiet=False, gamma=g, lambd=l, 
-        walgo='multiprocessor', w_epochs=51, omega_epochs=100, num_proc=48,
-                ytransform=None)
+    g, l = 1e-10, 1e10
+    
+    ytest = y[:ntrain]
+
+    lassom = Lasso(alpha=g)
+    lassom.fit(X[:ntrain], y[:ntrain])
+    yhatlasso = lassom.predict(X[:ntrain])
+    print "\nLasso MSE:", numpy.mean((yhatlasso - ytest)**2)
+
+    print "MSSL"
+    mssl = pMSSL(max_epochs=25, quiet=False, gamma=g, lambd=l, 
+        walgo='multiprocessor', w_epochs=51, omega_epochs=100, num_proc=1,
+                ytransform=None, rho=1.)
     mssl.fit(X[:ntrain], y[:ntrain])
-    yhat = mssl.predict(X[ntrain:])
-    p = numpy.mean([pearsonr(y[ntrain:,i], yhat[:, i])[0] for i in range(yhat.shape[1])])
-    mse = numpy.mean((yhat - y[ntrain:])**2)
+    yhat = mssl.predict(X[:ntrain])
+    p = numpy.mean([pearsonr(ytest[:, i], yhat[:, i])[0] for i in range(yhat.shape[1])])
+    mse = numpy.mean((yhat - ytest)**2)
     num_omega_zeros = numpy.sum(mssl.Omega == 0)
     num_w_zeros = numpy.sum(mssl.W == 0)
     d = {"gamma": g, "lambda": l, "mse": mse, "omega_zeros": num_omega_zeros, "w_zeros": num_w_zeros, "pearson": p}
     #print mssl.W
     print d
-
 def climate():
 
     lambd = 1e2
