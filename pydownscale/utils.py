@@ -48,8 +48,8 @@ class LogTransform():
 
     def inverse_transform(self,X):
         xinv = X*self.xstd + self.xmean
-        return numpy.exp(xinv)-1e-10
-
+        xinv = numpy.exp(xinv)-1e-10
+        return xinv
 
 if __name__ == "__main__":
     import numpy

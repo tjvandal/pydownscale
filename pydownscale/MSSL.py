@@ -45,15 +45,14 @@ class pMSSL:
     def fit(self, X, y, epsomega=1e-3, epsw=1e-3):
         start_time = time.time()
         X, self.X_frob = utils.center_frob(X)
-        self.scaler = preprocessing.StandardScaler(with_std=False).fit(y)
         self.shifty = 0
         if self.ytransform == 'log':
-            self.yscale = utils.LogTransform()
-            self.yscale.fit(y)
+            self.scaler = utils.LogTransform()
+            self.scaler.fit(y)
             y = self.scaler.transform(y)
         elif self.ytransform is None:
+            self.scaler = preprocessing.StandardScaler(with_std=False).fit(y)
             y = self.scaler.transform(y)
-            pass 
         else:
             raise ValueError("I don't know how to transform y")
         Xy = X.T.dot(y)
@@ -138,7 +137,9 @@ class pMSSL:
         X = X.dot(self.X_frob)
         yhat = X.dot(self.W.values)
         if self.ytransform == 'log':
+           print "inverse transform log"
            yhat = self.scaler.inverse_transform(yhat)
+           print "minimum", yhat[:, 0].min()
         elif self.ytransform is None:
            yhat = self.scaler.inverse_transform(yhat)
         return yhat
