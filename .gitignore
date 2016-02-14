@@ -2,3 +2,4 @@
 *config.py
 *.pdf
 *.csv
+mpi/*
