@@ -43,22 +43,26 @@ class DownscaleData:
 
 	# Line up datasets so that the times match.  Exclude observations outside of the timeframe.
     def _matchdates(self):
-		key1 = self.reanalysis.keys()[0]
-		mintime = max(self.reanalysis[key1].time.min(), self.observations.time.min())
-		maxtime = min(self.reanalysis[key1].time.max(), self.observations.time.max())
+        key1 = self.reanalysis.keys()[0]
+        mintime = max(self.reanalysis[key1].time.min(), self.observations.time.min())
+        maxtime = min(self.reanalysis[key1].time.max(), self.observations.time.max())
 
-		cmiptimes = (self.reanalysis[key1].time >= mintime) & (self.reanalysis[key1].time <= maxtime)
-		obstimes = (self.observations.time >= mintime) & (self.observations.time <= maxtime)
+        cmiptimes = (self.reanalysis[key1].time >= mintime) & (self.reanalysis[key1].time <= maxtime)
+        obstimes = (self.observations.time >= mintime) & (self.observations.time <= maxtime)
+        time_intersection = numpy.intersect1d(self.reanalysis[key1].time.values,
+                                              self.observations.time.values)
 
-		for key in self.reanalysis:
-			self.reanalysis[key] = self.reanalysis[key].loc[dict(time=self.reanalysis[key].time[cmiptimes])]
+        for key in self.reanalysis:
+            #self.reanalysis[key] = self.reanalysis[key].loc[dict(time=self.reanalysis[key].time[cmiptimes])]
+            self.reanalysis[key] = self.reanalysis[key].loc[dict(time=time_intersection)]
 
-		self.observations = self.observations.loc[dict(time=self.observations.time[obstimes])]
+        #self.observations = self.observations.loc[dict(time=self.observations.time[obstimes])]
+        self.observations = self.observations.loc[dict(time=time_intersection)]
 
-		if (len(self.reanalysis[key1].time) != len(self.observations.time)) or \
-				sum(self.reanalysis[key1].time == self.observations.time) != len(self.reanalysis[key1].time):
-				print self.reanalysis[key1].time, self.observations.time
-				raise IndexError("times do not match.  add functionality if this is not an error")
+        if (len(self.reanalysis[key1].time) != len(self.observations.time)) or \
+                sum(self.reanalysis[key1].time == self.observations.time) != len(self.reanalysis[key1].time):
+                print self.reanalysis[key1].time, self.observations.time
+                raise IndexError("times do not match.  add functionality if this is not an error")
 
     def get_X(self, timedim='time'):
         import config
@@ -81,7 +85,14 @@ class DownscaleData:
             location = y.columns.to_series()
             y = y.values
             ycolmean = y.mean(axis=0)
-            cols = (ycolmean != -999.) * (ycolmean != 0.) * (~numpy.isnan(ycolmean))
+            ybelow = (y >= 0).mean(axis=0)
+            # all columns must not be all zero, have a negative value, or have a nan value
+            #print numpy.where(y < 0)[0]
+            #print y[numpy.where(y<0)]
+            #print ybelow
+            idx = numpy.where(ybelow != 1)[0][-1]
+            idx2 = numpy.where(y[:, idx] == -999.)[0]
+            cols = (ycolmean !=0 ) * (ybelow == 1.) * (~numpy.isnan(ycolmean))
             y = y[:, cols]
             location = location[cols]
         return y, location
@@ -283,12 +294,17 @@ def test_transformation():
 if __name__ == "__main__":
     import config
     import pickle
-    how = "MS"
+    how = "D"
 
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how=how)
     print "reading observations"
     obs = read_obs(how=how)  # we are in mm
+    rows = ((obs == -999).mean(dim=('lat', 'lon'))['precip']) < 0.20    # delete those with lots of 999.s 
+    times = obs['time'][rows]
+    print "time skipped", obs['time'][~rows]
+    obs = obs.loc[{'time': times}]
+
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
     y, loc = D.get_y()

@@ -98,7 +98,6 @@ class DownscaleModel:
                 if hasattr(self.model, "alpha_"):
                     res["lasso_alpha"] = numpy.mean(self.model.alpha_)
                 results.append(res)
-            pass
 
         return results
 
