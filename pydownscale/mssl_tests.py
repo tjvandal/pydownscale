@@ -53,7 +53,7 @@ def test_log_data():
     W[rows1, :3] += numpy.random.normal(0, 2, size=(len(rows1), 1))
     W[rows2, 5:10] += numpy.random.normal(0, 2, size=(len(rows2), 1))
 
-    X = numpy.random.uniform(-1, 1, size=(n, d))
+    X = numpy.random.uniform(0, 1, size=(n, d))
     X = X.dot(numpy.diag(1./numpy.sqrt(numpy.sum(X**2, axis=0))))
     y = X.dot(W) + numpy.random.normal(0, 1, size=(n, k))
     y = numpy.exp(y)

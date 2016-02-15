@@ -44,6 +44,9 @@ class pMSSL:
 
     def fit(self, X, y, epsomega=1e-3, epsw=1e-3):
         start_time = time.time()
+        self.scale_x = utils.BoxcoxTransform()  ## lets make our distributions as normal as possible
+        self.scale_x.fit(X)
+        X = self.scale_x.transform(X)
         X, self.X_frob = utils.center_frob(X)
         self.shifty = 0
         if self.ytransform == 'log':
@@ -83,7 +86,7 @@ class pMSSL:
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
 
         WList = [self.W.values.copy()]
-        yhat = self.predict(X)
+        yhat = self.predict(self.scale_x.inverse_transform(X))
         ytrue = y #*self.y_std + self.y_mean
         mse = numpy.mean((ytrue - yhat)**2)
         for t in range(self.max_epochs):
@@ -108,7 +111,7 @@ class pMSSL:
                 break
 
             # Print stuff?
-            yhat = self.predict(X)
+            yhat = self.predict(self.scale_x.inverse_transform(X))
             ytrue = self.scaler.inverse_transform(y)
             mse = numpy.mean((ytrue - yhat)**2)
             if not self.quiet:
@@ -134,6 +137,7 @@ class pMSSL:
         return cost 
 
     def predict(self, X):
+        X = self.scale_x.transform(X)
         X = X.dot(self.X_frob)
         yhat = X.dot(self.W.values)
         if self.ytransform == 'log':
