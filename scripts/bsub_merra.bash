@@ -1,10 +1,10 @@
 #!/bin/sh
-#BSUB -J mssl_usa
-#BSUB -o mssl_usa
+#BSUB -J merra 
+#BSUB -o merra 
 #BSUB -e error_mssl_usa
-#BSUB -n 50 
-#BSUB -q ser-par-10g-2 
-#BSUB -cwd /home/vandal.t/repos/pydownscale/mpi
+#BSUB -n 20		
+#BSUB -q ser-par-10g-3
+#BSUB -cwd /home/vandal.t/repos/pydownscale/scripts
 ######## THIS IS A TEMPLATE FILE FOR TCP ENABLED MPI RUNS ON THE DISCOVERY CLUSTER ########
 #### #BSUB -n has a value equal to the given value for the -np option ####
 # prefix for next run is entered below
@@ -14,7 +14,7 @@
 #### "pwd"
 #### IF you stage your files this is your run directory in the high speed scratch space mounted 
 #### across all compute nodes
-work=/home/vandal.t/repos/pydownscale/mpi
+work=/home/vandal.t/repos/pydownscale/scripts
 #####################################################
 ########DO NOT EDIT ANYTHING BELOW THIS LINE#########
 #####################################################
@@ -40,7 +40,7 @@ done
 ###### MAKE SURE THAT THE "#BSUB -n" is equal to the "-np" number below. IN this example it is 8.
 
 # source /shared/apps/sage/sage-5.12/spkg/bin/sage-env
-mpirun -np 50 -prot -TCP -lsf /shared/apps/sage/sage-5.12/spkg/bin/sage -python /home/vandal.t/repos/pydownscale/mpi_mssl_distributed.py
+mpirun -np 20 -prot -TCP -lsf /shared/apps/sage/sage-5.12/spkg/bin/sage -python /home/vandal.t/repos/pydownscale/scripts/merra_preprocess.py
 # any clean up tasks and file migration code is entered below
 
 #####################################################

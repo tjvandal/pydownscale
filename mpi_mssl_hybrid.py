@@ -1,7 +1,7 @@
 #!/shared/apps/sage/sage-5.12/spkg/bin/sage -python
 '''
 local testing command:
-mpirun -np 48 /shared/apps/sage/sage-5.12/spkg/bin/sage -python mpi_mssl_distributed.py
+mpirun -np 48 /shared/apps/sage/sage-5.12/spkg/bin/sage -python mpi_mssl_hybrid.py
 '''
 import sys
 sys.path.insert(0, "/home/vandal.t/anaconda2/lib/python2.7/site-packages")
@@ -21,17 +21,15 @@ import argparse
 import pandas
 import pickle
 
-
-
-epochs = 25
+epochs = 5 
 omega_epochs = 50 
-w_epochs = 50
+w_epochs = 10
 size_per_job = 48
+num_proc = size_per_job
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
-print "Size = %i, Rank = %i" % (size, rank)
 
 groupworld = comm.Get_group()
 num_groups = max(int(size/size_per_job), 1)
@@ -47,7 +45,6 @@ if rank == 0:
 ## split up job ranks 
 jobranks = numpy.array_split(jobranks, num_groups)
 
-print "Job ranks", rank, jobranks
 
 # Build groups and communicators 
 groups = [groupworld.Range_incl([(sub[0],sub[-1],1),]) for sub in jobranks]
@@ -57,42 +54,40 @@ for j, sub in enumerate(jobranks):
     if rank in sub:
         mygroupidx = j
         mygroup = groups[j]
-        rootrank = sub[0]
+        rootrank = 0
         mygroupcomm = groupcomms[j]
+        mygrouprank = mygroupcomm.Get_rank()
         break
 
-#data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/day_9862_780.pkl','r')) 
-data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_daily_12783_7657.pkl','r')) 
-total_feature_count = data.get_X().shape[1]
+if  mygrouprank == 0:
+    print "My group rank: %i, Processor: %s" % (mygrouprank, MPI.Get_processor_name())
+    data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_daily_12783_7657.pkl','r')) 
+    total_feature_count = data.get_X().shape[1]
+    y = data.get_y()[0] 
+    print y.shape
 
-seasons = ['DJF', 'MAM', 'JJA', 'SON']
-lambda_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(1e0), num=5)
-gamma_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(1e1), num=5)
+    #seasons = ['DJF', 'MAM', 'JJA', 'SON']
+    lambda_range = numpy.logspace(numpy.log10(1e-2), numpy.log10(1e0), num=4)
+    gamma_range = numpy.logspace(numpy.log10(1e-3), numpy.log10(1e1), num=4)
 
-seasons = ['SON']
-#gamma_range=[1e-8]
+    seasons = ['SON']
+    #gamma_range=[1e-8]
 
-# lets split parameters the good way
-params = numpy.array([[g, l, s] for g in gamma_range for l in lambda_range for s in seasons])
-params = numpy.array_split(params, num_groups)
-params = params[mygroupidx] 
+    # lets split parameters the good way
+    params = numpy.array([[g, l, s] for g in gamma_range for l in lambda_range for s in seasons])
+    params = numpy.array_split(params, num_groups)
+    params = params[mygroupidx] 
 
-model_costs = []
-model_results = []
-for i, (g, l, seas) in enumerate(params):
-    print "Rank: %i, Gamma: %s, Lambda: %s, Season: %s" % (rank, str(g), str(l), str(seas))	
-    model = pMSSL(max_epochs=epochs, gamma=float(g), lambd=float(l), 
-        quiet=False, omega_epochs=omega_epochs, w_epochs=w_epochs, walgo='mpi', mpicomm=mygroupcomm,
-               mpiroot=0)
-    t0 = time.time()
+    model_costs = []
+    model_results = []
+    for i, (g, l, seas) in enumerate(params):
+        model = pMSSL(max_epochs=epochs, gamma=float(g), lambd=float(l), 
+            quiet=False, omega_epochs=omega_epochs, w_epochs=w_epochs, walgo='multiprocessor',
+                      num_proc=num_proc, ytransform='log')
+        t0 = time.time()
+        dmodel = DownscaleModel(data, model, season=seas)
+        dmodel.train()
 
-    #try:
-    dmodel = DownscaleModel(data, model, season=seas)
-    dmodel.train()
-    print "Finished training at rank", rank
-    mygroupcomm.Barrier()
-
-    if rank == rootrank:
         print "getting results from the group number", mygroupidx
         res = dmodel.get_results(test_set=False)
         print "Omega Zeros: %i, W Zeros: %i" % ((dmodel.model.Omega.values == 0).sum(), (dmodel.model.W.values == 0).sum()) 
@@ -103,17 +98,24 @@ for i, (g, l, seas) in enumerate(params):
             r['omega'] = dmodel.model.Omega.values
             r['W'] = dmodel.model.W.values
             model_results.append(r)
-print "Got results from group number", mygroupidx
+        break
+    print "Got results from group number", mygroupidx
 
-if rank == rootrank:
     data = pandas.DataFrame(model_results)
-    data.to_pickle("mssl-results/mssl_downscale_results_US_%i_%s_%i.pkl" % (epochs, timestr, mygroupidx))
+    data.to_pickle("mssl-results/mssl_downscale_results_NE_%i_%s_%i.pkl" % (epochs, timestr, mygroupidx))
 
-sys.exit()
 
 if rank == 0:
-	print "Attempting to gather Results"
-	results = [r for res in model_results for r in res]
-	data = pandas.DataFrame(results)
-	data.to_pickle("mssl-results/mssl_US_%i_%s.pkl" % (epochs, timestr))
+    all_results = []
+    for f in os.listdir("mssl-results"):
+        ff = "mssl_downscale_results_NE_%i_%s" % (epochs, timestr) 
+        if ff  in f:
+            fread = os.path.join("mssl-results", f)
+            df = pickle.load(open(fread, 'r'))
+            all_results.append(df)
+    outdata = pandas.concat(all_results)
+    fall = "mssl-results/mssl_downscale_results_NE_%i_%s.pkl" % (epochs, timestr)
+    outdata.to_pickle(fall)
+
+
 
