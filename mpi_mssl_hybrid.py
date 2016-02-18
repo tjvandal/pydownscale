@@ -13,6 +13,7 @@ import time
 import numpy
 from sklearn.linear_model import LinearRegression, Lasso, MultiTaskLassoCV
 from sklearn.feature_selection import RFE
+from sklearn.preprocessing import StandardScaler
 from pydownscale.data import DownscaleData, read_nc_files
 from pydownscale.downscale import DownscaleModel
 from pydownscale.MSSL import pMSSL
@@ -21,10 +22,10 @@ import argparse
 import pandas
 import pickle
 
-epochs = 5 
+epochs = 10
 omega_epochs = 50 
-w_epochs = 10
-size_per_job = 48
+w_epochs = 25
+size_per_job = 48 
 num_proc = size_per_job
 
 comm = MPI.COMM_WORLD
@@ -61,14 +62,14 @@ for j, sub in enumerate(jobranks):
 
 if  mygrouprank == 0:
     print "My group rank: %i, Processor: %s" % (mygrouprank, MPI.Get_processor_name())
-    data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_daily_12783_7657.pkl','r')) 
+    data = pickle.load(open('/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_MS_420_8835.pkl','r')) 
     total_feature_count = data.get_X().shape[1]
     y = data.get_y()[0] 
     print y.shape
 
     #seasons = ['DJF', 'MAM', 'JJA', 'SON']
-    lambda_range = numpy.logspace(numpy.log10(1e-2), numpy.log10(1e0), num=4)
-    gamma_range = numpy.logspace(numpy.log10(1e-3), numpy.log10(1e1), num=4)
+    lambda_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(1e0), num=20)
+    gamma_range = numpy.logspace(numpy.log10(1e-4), numpy.log10(1e1), num=6)
 
     seasons = ['SON']
     #gamma_range=[1e-8]
@@ -83,7 +84,7 @@ if  mygrouprank == 0:
     for i, (g, l, seas) in enumerate(params):
         model = pMSSL(max_epochs=epochs, gamma=float(g), lambd=float(l), 
             quiet=False, omega_epochs=omega_epochs, w_epochs=w_epochs, walgo='multiprocessor',
-                      num_proc=num_proc, ytransform='log')
+                      num_proc=num_proc, ytransform=StandardScaler(), xtransform=StandardScaler())
         t0 = time.time()
         dmodel = DownscaleModel(data, model, season=seas)
         dmodel.train()
@@ -98,7 +99,7 @@ if  mygrouprank == 0:
             r['omega'] = dmodel.model.Omega.values
             r['W'] = dmodel.model.W.values
             model_results.append(r)
-        break
+
     print "Got results from group number", mygroupidx
 
     data = pandas.DataFrame(model_results)

@@ -5,6 +5,13 @@ import config
 import pandas
 import pickle 
 import time
+from stepwise_regression import BackwardStepwiseRegression
+from joblib import Parallel, delayed
+import copy
+import xray
+import utils
+from sklearn.preprocessing import StandardScaler 
+from sklearn.linear_model import LassoCV
 
 class DownscaleModel:
     def __init__(self, data, model, training_size=config.train_percent, season=None, feature_columns=None):
@@ -16,27 +23,30 @@ class DownscaleModel:
         self.data = data
         self.model = model
         self.season = season
+        self.feature_columns = feature_columns
+        self.training_size = training_size
         if self.season:
             key0 = self.data.reanalysis.keys()[0]
             self.seasonidxs = numpy.where(self.data.reanalysis[key0]['time.season'] == self.season)[0]
 
-        self._split_dataset(training_size, feature_columns=feature_columns)
 
-    def _split_dataset(self, training_size, feature_columns=None):
-        if feature_columns is not None:
-            X = self.data.get_X()[:, feature_columns]
+    def _split_dataset(self):
+        if self.feature_columns is not None:
+            X = self.data.get_X()[:, self.feature_columns]
         else:
             X = self.data.get_X()
 
         if self.season:
             X = X[self.seasonidxs, :]
 
-        self.numtrain = int(X.shape[0] * training_size)
+        self.numtrain = int(X.shape[0] * self.training_size)
         self.X_train = X[:self.numtrain]
         self.X_test = X[self.numtrain:]
 
+
     # include quantile mapping ability
     def train(self, location=None):
+        self._split_dataset()
         start_time = time.time()
         y, self.location = self.data.get_y(location=location)
         t = self.data.observations['time'].values
@@ -104,51 +114,106 @@ class DownscaleModel:
     def predict(self, X):
         pass
 
+def asd_worker(model, X, y):
+    model.fit(X, y)
+    return model
+
+class ASD(DownscaleModel):
+    def __init__(self, data, model=BackwardStepwiseRegression(), training_size=config.train_percent,
+                 season=None, feature_columns=None, latdim='lat', londim='lon',
+                 nearest_neighbor=True, ytransform=None, xtransform=None, num_proc=48):
+        DownscaleModel.__init__(self, data, model, training_size=config.train_percent, season=season)
+        self.nearest_neighbor = nearest_neighbor
+        self.xtransform = xtransform
+        self.ytransform = ytransform
+        self.num_proc = num_proc
+
+    def _split_dataset(self, X, y, test_set=False):
+        if self.season:
+            X = X[self.seasonidxs]
+            y = y[self.seasonidxs]
+        idx = int(X.shape[0] * self.training_size)
+        if test_set:
+            return X[idx:], y[idx:]
+        else:
+            return X[:idx], y[:idx]
+
+    def train(self, location=None):
+        y, self.locations = self.data.get_y(location=location)
+        jobs = []
+        if self.xtransform is not None:
+            self.xtrans = []
+        if self.ytransform is not None:
+            self.ytrans = []
+        for j, row in self.locations.iterrows():
+            if self.nearest_neighbor:
+                X = data.get_nearest_X(row[self.data.reanalysis_latdim],
+                                   row[self.data.reanalysis_londim])
+            else:
+                X = data.get_X()
+            Xtrain, ytrain = self._split_dataset(X, y[:,j])
+            ytrain = ytrain.reshape(-1,1)
+            if self.xtransform is not None:
+                self.xtrans += [copy.deepcopy(self.xtransform)]
+                self.xtrans[j].fit(Xtrain)
+                Xtrain = self.xtrans[j].transform(Xtrain)
+            if self.ytransform is not None:
+                self.ytrans += [copy.deepcopy(self.ytransform)]
+                self.ytrans[j].fit(ytrain)
+                ytrain = self.ytrans[j].transform(ytrain)
+            jobs.append(delayed(asd_worker)(copy.deepcopy(self.model), Xtrain.copy(),
+                                            ytrain.flatten().copy()))
+        t = time.time()
+        self.models = Parallel(n_jobs=self.num_proc)(jobs)
+
+    def predict(self, test_set=True, location=None):
+        Y, self.locations = self.data.get_y(location=location)
+        t = self.data.observations['time'].values
+        t, _ = self._split_dataset(t, Y, test_set=test_set)
+        yhat = []
+        ytrue =[]
+        for j, row in self.locations.iterrows():
+            if self.nearest_neighbor:
+                X = data.get_nearest_X(row[self.data.reanalysis_latdim],
+                                   row[self.data.reanalysis_londim])
+            else:
+                X = data.get_X()
+
+            X, y = self._split_dataset(X, Y[:, j], test_set=test_set) 
+            if self.xtransform is not None:
+                X = self.xtrans[j].transform(X)
+
+            yhat += [self.models[j].predict(X)]
+            #print "Yhat range", numpy.min(yhat[-1]), numpy.max(yhat[-1])
+            if self.ytransform is not None:
+                yhat[j] = self.ytrans[j].inverse_transform(yhat[j])
+            ytrue += [y]
+        yhat = numpy.vstack(yhat).T
+        ytrue = numpy.vstack(ytrue).T
+        yhat = self.to_xray(yhat, t).rename({"value": "projected"})
+        ytrue = self.to_xray(ytrue, t).rename({"value": "ground_truth"})
+        out = yhat.merge(ytrue)
+        out['error'] = out.projected - out.ground_truth
+        return out
+
+    def to_xray(self, y, times):
+        data = []
+        for i, row in self.locations.iterrows():
+            for j, t in enumerate(times):
+                data.append({"value": y[j,i], self.data.obs_latdim: row[self.data.obs_latdim],
+                             'time': t, self.data.obs_londim: row[self.data.obs_londim]})
+        data = pandas.DataFrame(data)
+        data.set_index([self.data.obs_latdim, self.data.obs_londim, "time"], inplace=True)
+        data = xray.Dataset.from_dataframe(data)
+        return data
 
 if __name__ == "__main__":
-    import pandas
-    from sklearn.linear_model import LassoCV, LinearRegression
-    import time
-    t0 = time.time()
-
-    cmip5_dir = "/Users/tj/data/reanalysis_ncar_monthly/"
-    cpc_dir = "/Users/tj/data/usa_cpc_nc/merged/"
-
-    # climate model data, monthly
-    cmip5 = read_nc_files(cmip5_dir)
-    cmip5.load()
-    cmip5 = assert_bounds(cmip5, {'lat': [15, 55], 'lon': [200, 320]})
-    cmip5 = cmip5.resample('MS', 'time', how='mean')   ## try to not resample
-
-    # daily data to monthly
-    cpc = read_nc_files(cpc_dir)
-    cpc.load()
-    cpc = assert_bounds(cpc, {'lat': [42, 42.5], 'lon': [-71, -70]})
-    monthlycpc = cpc.resample('MS', dim='time', how='mean')  ## try to not resample
-
-    print "Data Loaded: %d seconds" % (time.time() - t0)
-    data = DownscaleData(cmip5, monthlycpc)
-    data.normalize_monthly()
-    pairs = data.location_pairs('lat', 'lon')
-
-    # print "Data Normalized: %d" % (time.time() - t0)
-    linearmodel = LassoCV(alphas=[0.01, 0.1, 1, 10, 100], max_iter=2000)
-    #linearmodel = LinearRegression()
-    dmodel = DownscaleModel(data, linearmodel, season='DJF') #, xvars=['uas', 'vas', 'tasmax', 'tasmin', 'hurs'])
-    dmodel.train(location={'lat': pairs[0][0], 'lon': pairs[0][1]})
-    X = dmodel.X_train
-    y = dmodel.y_train
-    print dmodel.get_results()
-
-    from matplotlib import pyplot
-    import seaborn
-
-    pyplot.plot(dmodel.y_test)
-    pyplot.plot(dmodel.yhat_test)
-    pyplot.show()
-    nonzero = numpy.where(dmodel.model.coef_ != 0)[0]
-    print "chosen alpha", dmodel.model.alpha_
-    print "NON zero indicies", nonzero, sum(numpy.abs(dmodel.model.coef_))
-    print X[:, nonzero].shape
-
-    print "Time to downscale: %d" % (time.time() - t0)
+    datafile = '/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_MS_420_8835.pkl'
+    data = pickle.load(open(datafile, 'r'))
+#    linear_models = [LassoCV(), BackwardStepwiseRegression()]
+    season = 'SON'
+    model = ASD(data, nearest_neighbor=False, model=LassoCV(), season=season, xtransform=StandardScaler(), 
+                ytransform=StandardScaler(), num_proc=48)
+    model.train()
+    predicted = model.predict(test_set=True)
+    predicted.to_netcdf("asd_MS_NE_%s_%s.nc" % (season, model.model.__class__.__name__))

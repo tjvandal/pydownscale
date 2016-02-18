@@ -28,7 +28,8 @@ def softthreshold(X, thres):
 class pMSSL:
     def __init__(self, max_epochs=1000, quiet=True, lambd=1e-3, 
         gamma=1e-3, walgo='admm', omega_epochs=100, w_epochs=100, 
-        rho=1., mpicomm=None, mpiroot=None, ytransform='log', num_proc=1):
+        rho=1., mpicomm=None, mpiroot=None, ytransform=None, num_proc=1,
+        xtransform=None):
         self.lambd = float(lambd)
         self.max_epochs = max_epochs
         self.quiet = quiet
@@ -40,24 +41,21 @@ class pMSSL:
         self.mpicomm = mpicomm
         self.mpiroot = mpiroot
         self.ytransform = ytransform
+        self.xtransform = xtransform
         self.num_proc = num_proc
 
     def fit(self, X, y, epsomega=1e-3, epsw=1e-3):
         start_time = time.time()
-        self.scale_x = utils.BoxcoxTransform()  ## lets make our distributions as normal as possible
-        self.scale_x.fit(X)
-        X = self.scale_x.transform(X)
+        Xstart = X.copy()
+        if self.xtransform is not None:
+            self.xtransform.fit(X)
+            X = self.xtransform.transform(X)
+
         X, self.X_frob = utils.center_frob(X)
-        self.shifty = 0
-        if self.ytransform == 'log':
-            self.scaler = utils.LogTransform()
-            self.scaler.fit(y)
-            y = self.scaler.transform(y)
-        elif self.ytransform is None:
-            self.scaler = preprocessing.StandardScaler(with_std=False).fit(y)
-            y = self.scaler.transform(y)
-        else:
-            raise ValueError("I don't know how to transform y")
+        if self.ytransform is not None:
+            self.ytransform.fit(y)
+            y = self.ytransform.transform(y)
+
         Xy = X.T.dot(y)
         # Store the number of tasks, samples, and dimensions
         self.K = y.shape[1]
@@ -86,9 +84,6 @@ class pMSSL:
         print "Number of tasks: %i, Number of dimensions: %i, Number of observations: %i, Lambda: %0.4f, Gamma: %0.4f" % (self.K, self.d, self.n, self.lambd, self.gamma)
 
         WList = [self.W.values.copy()]
-        yhat = self.predict(self.scale_x.inverse_transform(X))
-        ytrue = y #*self.y_std + self.y_mean
-        mse = numpy.mean((ytrue - yhat)**2)
         for t in range(self.max_epochs):
             # Update W
             self.W.update(X, y, Omega=self.Omega.values)
@@ -111,13 +106,10 @@ class pMSSL:
                 break
 
             # Print stuff?
-            yhat = self.predict(self.scale_x.inverse_transform(X))
-            ytrue = self.scaler.inverse_transform(y)
-            mse = numpy.mean((ytrue - yhat)**2)
             if not self.quiet:
                 print "FULL Iteration %i, w zeros: %i, omega zeros: %i, lambda: %2.4f, gamma: %2.4f"  % (t, numpy.sum(self.W.values == 0), numpy.sum(self.Omega.values == 0),
                        self.lambd, self.gamma)
-                print "Omega diff:", omega_diff, "\tW Diff:", w_diff, "\tMSE:", mse
+                print "Omega diff:", omega_diff, "\tW Diff:", w_diff
 
             # 24 Hours is almost up
             if (time.time() - start_time) > (20. * 60 * 60):
@@ -137,15 +129,12 @@ class pMSSL:
         return cost 
 
     def predict(self, X):
-        X = self.scale_x.transform(X)
+        if self.xtransform is not None:
+            X = self.xtransform.transform(X)
         X = X.dot(self.X_frob)
         yhat = X.dot(self.W.values)
-        if self.ytransform == 'log':
-           print "inverse transform log"
-           yhat = self.scaler.inverse_transform(yhat)
-           print "minimum", yhat[:, 0].min()
-        elif self.ytransform is None:
-           yhat = self.scaler.inverse_transform(yhat)
+        if self.ytransform is not None:
+           yhat = self.ytransform.inverse_transform(yhat)
         return yhat
 
 class WFista:
@@ -449,7 +438,6 @@ class WADMMMultiProcessor:
 
         for k in range(self.maxepoch):
             Zbar_prev = Zbar.copy()
-
             # compute that update
             bs = Parallel(n_jobs=self.num_proc)(
                 delayed(compute_b)(X[:,feat], Theta[feat,:], Zbar, XWbar, U) for feat in feature_split)
@@ -516,7 +504,6 @@ def _w_update(x, w, Omega, b, rho, gamma, maxepochs=50):
     xx = x.T.dot(x)
     for l in range(maxepochs):
         zprev = z.copy()
-
         # updates
         theta = solve_sylvester(rho*xx + rho * numpy.eye(xx.shape[0]), 2*Omega, rho*xb + rho*(z-u))
         z = softthreshold(theta + u, 1.*gamma/rho)

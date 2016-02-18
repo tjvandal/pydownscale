@@ -12,14 +12,18 @@ normalization is no needed at this step, atleast until training
 
 class DownscaleData:
     def __init__(self, reanalysis, observations):
-		if isinstance(reanalysis, xray.Dataset):
-			reanalysis = [reanalysis]
+        if isinstance(reanalysis, xray.Dataset):
+            reanalysis = [reanalysis]
 
-		self.reanalysis = reanalysis
-		self.observations = observations
-		self._check_reanalysis()
-		self._checkindices()
-		self._matchdates()
+        self.reanalysis = reanalysis
+        self.observations = observations
+        self._check_reanalysis()
+        self._checkindices()
+        self._matchdates()
+        self.reanalysis_londim = config.reanalysis_londim
+        self.reanalysis_latdim = config.reanalysis_latdim
+        self.obs_londim = config.obs_londim
+        self.obs_latdim = config.obs_latdim
 
     def _check_reanalysis(self):
 		for _, n in self.reanalysis.iteritems():
@@ -33,8 +37,9 @@ class DownscaleData:
             if not 'time' in d.dims:
                 raise IndexError("time should be a dimension of cmip")
             times.append(d.time.values)
+            print _, d.time.values.dtype, d.time.values.shape
 
-        times = numpy.array(times)
+        times = numpy.vstack(times)
         if numpy.sum(times[0] - times).item() != 0:
             raise IndexError("All times in lowres data should be identical.")
 
@@ -75,7 +80,26 @@ class DownscaleData:
         x = numpy.column_stack(x)
         return x
 
-    def get_y(self, location=None, timedim='time', dim1='lat', dim2='lon'):
+    def get_nearest_X(self, latval, lonval, timedim='time'):
+        import config
+        x = []
+        for var in config.reanalysisvars:
+            self.reanalysis[var].load()
+            lats = self.reanalysis[var][self.reanalysis_latdim].values
+            lons = self.reanalysis[var][self.reanalysis_londim].values
+            latbelow = numpy.where(lats < latval)[0][-1]
+            latabove = numpy.where(lats > latval)[0][0]
+            lonbelow = numpy.where(lons < lonval)[0][-1]
+            lonabove = numpy.where(lons > lonval)[0][0]
+            subset = self.reanalysis[var][{self.reanalysis_latdim: slice(latbelow, latabove+1), 
+                                           self.reanalysis_londim: slice(lonbelow, lonabove+1)}]
+            df = subset.to_array().to_dataframe()
+            levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
+            x.append(df.unstack(levels).values)
+        x = numpy.column_stack(x)
+        return x
+
+    def get_y(self, location=None, timedim='time'):
         if location is not None:
             y = self.observations.loc[location].to_array().values.squeeze()
         else:
@@ -86,15 +110,16 @@ class DownscaleData:
             y = y.values
             ycolmean = y.mean(axis=0)
             ybelow = (y >= 0).mean(axis=0)
-            # all columns must not be all zero, have a negative value, or have a nan value
-            #print numpy.where(y < 0)[0]
-            #print y[numpy.where(y<0)]
-            #print ybelow
             idx = numpy.where(ybelow != 1)[0][-1]
             idx2 = numpy.where(y[:, idx] == -999.)[0]
             cols = (ycolmean !=0 ) * (ybelow == 1.) * (~numpy.isnan(ycolmean))
             y = y[:, cols]
             location = location[cols]
+            names = location.index.names
+            dim1idx = names.index(self.obs_latdim)
+            dim2idx = names.index(self.obs_londim)
+            locs = [[row[dim1idx], row[dim2idx]] for row in location.values]
+            location = pandas.DataFrame(numpy.vstack(locs), columns=[self.obs_latdim, self.obs_londim])
         return y, location
 
     def location_pairs(self, dim1, dim2):
@@ -267,7 +292,7 @@ def read_obs(how='MS'):
     obs = read_nc_files(config.obs_dir, config.highres_bounds)
     obs.load()
     obs.time = pandas.to_datetime(obs.time.values)
-    obs = obs.resample(how, dim='time', how='mean')
+    obs = obs.resample(how, dim='time', how=numpy.mean)
     return obs
 
 def test_transformation():
@@ -294,16 +319,16 @@ def test_transformation():
 if __name__ == "__main__":
     import config
     import pickle
-    how = "D"
-
+    how = "MS"
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how=how)
     print "reading observations"
-    obs = read_obs(how=how)  # we are in mm
+    obs = read_obs(how='D')  # we are in mm
     rows = ((obs == -999).mean(dim=('lat', 'lon'))['precip']) < 0.20    # delete those with lots of 999.s 
     times = obs['time'][rows]
     print "time skipped", obs['time'][~rows]
     obs = obs.loc[{'time': times}]
+    obs = obs.resample(how, dim='time', how='mean')
 
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
@@ -311,45 +336,18 @@ if __name__ == "__main__":
 
     print "Number of Tasks:", len(D.location_pairs("lat", "lon"))
     print "Shape of X:", X.shape
-    fname = "newengland_daily_%i_%i.pkl" % (X.shape[0], X.shape[1])
+    fname = "newengland_%s_%i_%i.pkl" % (how, X.shape[0], X.shape[1])
     f = os.path.join(config.save_dir, "DownscaleData", fname)
     pickle.dump(D, open(f, 'w'))
     print "Saved for file: %s" % f
-
-    gcm = read_lowres_data(which='gcm', how='MS')
+    '''
+    gcm = read_lowres_data(which='gcm', how=how)
     G = GCMData(gcm)
     GX = G.get_X()
     print "SHAPE OF GCM X:", GX.shape
-
-    '''
-    Daily = read_config_data_daily()
-    X = Daily.get_X()
-    print "Shape of X:", X.shape
-    fname = "daily_%i_%i.pkl" % (X.shape[0], X.shape[1])
-    f = os.path.join(config.save_dir, "DownscaleData", fname)
-    pickle.dump(Daily, open(f, 'w'))
-    print "Saved for file: %s" % f
-    '''
-
-    '''
-    import config
-    reanalysis_dir = config.reanalysis_dir
-    obs_dir = config.obs_dir
-
-    reanalysis, obs = test_data()
-
-    d = DownscaleData(reanalysis, obs)
-    X = d.get_X()
-
-    print d.location_pairs('lat', 'lon')
-
-    lt = d.reanalysis[0]['lat'].values[0]
-    ln = d.reanalysis[0]['lon'].values[0]
-    prcp = d.reanalysis[0].loc[{'lat':  lt, 'lon': ln}]
-
-    from matplotlib import pyplot
-    import seaborn
-
-    pyplot.hist(X.flatten())
-    pyplot.show()
-    '''
+    ''' 
+    datafile = '/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_daily_12783_720.pkl'
+    data = pickle.load(open(datafile, 'r'))
+    locations = data.location_pairs("lat", "lon")
+    Xnear = data.get_nearest_X(locations[0][0], locations[0][1])
+    X = data.get_X()
