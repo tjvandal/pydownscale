@@ -19,6 +19,7 @@ from data import DownscaleData
 from downscale import DownscaleModel
 from scipy.stats import pearsonr
 import scipy.sparse
+from sklearn.preprocessing import StandardScaler
 
 def test1_data():
     numpy.random.seed(0)
@@ -136,7 +137,7 @@ def test_joblib():
     print "MSSL"
     mssl = pMSSL(max_epochs=25, quiet=False, gamma=g, lambd=l, 
         walgo='multiprocessor', w_epochs=51, omega_epochs=100, num_proc=1,
-                ytransform="log", rho=1.)
+                ytransform=StandardScaler(), rho=1., xtransform=StandardScaler())
     mssl.fit(X_train, ytrain)
     yhat = mssl.predict(X_train)
     p = numpy.mean([pearsonr(ytrain[:,i], yhat[:,i])[0] for i in range(yhat.shape[1])])
