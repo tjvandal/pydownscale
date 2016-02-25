@@ -156,9 +156,10 @@ class GCMData:
             tvar = numpy.in1d(times[j], timeset)
             self.data[var] = self.data[var].loc[{'time': timeset}]
 
-
     def get_X(self, timedim='time', season=None):
         x = []
+        key0 = config.gcmvars[0]
+        t = self.data[key0][timedim].values
         for var in config.gcmvars:
             self.data[var].load()
             df = self.data[var].to_array().to_dataframe()
@@ -166,14 +167,15 @@ class GCMData:
             x.append(df.unstack(levels).values)
         x = numpy.column_stack(x)
         if season is not None:
-            key0 = config.gcmvars[0]
             seasonidxs = numpy.where(self.data[key0]['time.season']== season)[0]
             x = x[seasonidxs, :]
+            t = t[seasonidxs]
+        return x, t
 
-        return x
-
-    def get_nearest_X(self, latval, lonval, timedim='time'):
+    def get_nearest_X(self, latval, lonval, season=None, timedim='time'):
         x = []
+        key0 = config.gcmvars[0]
+        t = self.data[key0][timedim].values
         for var in config.gcmvars:
             self.data[var].load()
             lats = self.data[var][config.gcm_latdim].values
@@ -188,8 +190,11 @@ class GCMData:
             levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
             x.append(df.unstack(levels).values)
         x = numpy.column_stack(x)
-        return x
-
+        if season is not None:
+            seasonidxs = numpy.where(self.data[key0]['time.season']== season)[0]
+            x = x[seasonidxs, :]
+            t = t[seasonidxs]
+        return x, t
 
 def get_reanalysis_file_paths(basedir):
     files = []
