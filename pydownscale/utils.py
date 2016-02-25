@@ -59,7 +59,6 @@ class BoxcoxTransform():
         self.xstd = xtrans.std(axis=0)
 
     def transform(self, X):
-        Xcopy = X.copy()
         X += self.shift
         if isinstance(self.lmbda, float):
             xb = boxcox(X, self.lmbda)
@@ -77,7 +76,7 @@ class BoxcoxTransform():
             xinv = numpy.zeros(shape=X.shape)
             for j, lmb in enumerate(self.lmbda):
                 xinv[:, j] = inv_boxcox(xtemp[:, j], lmb)
-        return xinv - self.shift 
+        return xinv #- self.shift 
 
 if __name__ == "__main__":
     from matplotlib import pyplot
