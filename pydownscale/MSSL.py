@@ -64,7 +64,7 @@ class pMSSL:
 
         if (self.walgo == 'admm') and (not hasattr(self, 'W')):
             self.W = WADMM(rho=self.rho, gamma=self.gamma, lambd=self.lambd, 
-                shape=(self.d, self.K), quiet=self.quiet)
+                shape=(self.d, self.K), quiet=self.quiet, w_epochs=self.w_epochs)
 
         elif (self.walgo == 'mpi') and (not hasattr(self, 'W')):
             self.W = WMPIDistributed(rho=self.rho, gamma=self.gamma, 
@@ -405,7 +405,7 @@ def compute_b(xi, thetai, Zbar, XWbar, U):
 
 class WADMMMultiProcessor:
     def __init__(self, lambd, gamma, shape, rho=1., 
-                maxepoch=100, maxepoch_inner=100, quiet=True, 
+                maxepoch=100, maxepoch_inner=25, quiet=True, 
                 mpicomm=None, root=0, num_proc=1):
         self.lambd = lambd
         self.gamma = gamma
@@ -484,7 +484,7 @@ class WADMMMultiProcessor:
             prevdual = dualresid
 
         self.Zbar_prev = Zbar_prev
-        self.values = Theta 
+        self.values = Theta.copy() 
 
     def XW_mean(self, X, W, feature_split):
         temp = [X[:,features].dot(W[features,:]) for features in feature_split]
@@ -493,7 +493,7 @@ class WADMMMultiProcessor:
     def predict(self, X):
         return X.dot(self.values)
 
-def _w_update(x, w, Omega, b, rho, gamma, maxepochs=50):
+def _w_update(x, w, Omega, b, rho, gamma, maxepochs=25):
     theta = w.copy()
     n = x.shape[0]
     z = w.copy() #numpy.zeros(shape=w.shape)
