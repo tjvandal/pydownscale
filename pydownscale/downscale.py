@@ -207,6 +207,65 @@ class ASD(DownscaleModel):
         data = xray.Dataset.from_dataframe(data)
         return data
 
+class ASDMultitask(DownscaleModel):
+    def __init__(self, data, model, training_size=config.train_percent,
+                 season=None, feature_columns=None,
+                 ytransform=None, xtransform=None):
+        DownscaleModel.__init__(self, data, model, training_size=config.train_percent, season=season)
+        self.xtransform = xtransform
+        self.ytransform = ytransform
+
+    def _split_dataset(self, X, y, test_set=False):
+        if self.season:
+            X = X[self.seasonidxs]
+            y = y[self.seasonidxs]
+        idx = int(X.shape[0] * self.training_size)
+        if test_set:
+            return X[idx:], y[idx:]
+        else:
+            return X[:idx], y[:idx]
+
+    def train(self):
+        y, self.locations = self.data.get_y()
+        X = self.data.get_X()
+        Xtrain, ytrain = self._split_dataset(X, y) 
+        if self.xtransform is not None:
+            self.xtransform.fit(Xtrain)
+            Xtrain = self.xtransform.transform(Xtrain)
+        if self.ytransform is not None:
+            self.ytransform.fit(ytrain)
+            ytrain = self.ytransform.transform(ytrain)
+        self.model.fit(Xtrain, ytrain)
+
+    def predict(self, test_set=True):
+        y, self.locations = self.data.get_y()
+        t = self.data.observations['time'].values
+        X = self.data.get_X()
+        t, _ = self._split_dataset(t, y, test_set=test_set)
+        X, y = self._split_dataset(X, y) 
+        if self.xtransform is not None:
+            X = self.xtransform.transform(X)
+        yhat = self.model.predict(X)
+        if self.ytransform is not None:
+            yhat = self.ytransform.inverse_transform(yhat)
+        yhat = self.to_xray(yhat, t).rename({"value": "projected"})
+        ytrue = self.to_xray(y, t).rename({"value": "ground_truth"})
+        out = yhat.merge(ytrue)
+        out['error'] = out.projected - out.ground_truth
+        return out
+
+    def to_xray(self, y, times):
+        data = []
+        for i, row in self.locations.iterrows():
+            for j, t in enumerate(times):
+                data.append({"value": y[j,i], self.data.obs_latdim: row[self.data.obs_latdim],
+                             'time': t, self.data.obs_londim: row[self.data.obs_londim]})
+        data = pandas.DataFrame(data)
+        data.set_index([self.data.obs_latdim, self.data.obs_londim, "time"], inplace=True)
+        data = xray.Dataset.from_dataframe(data)
+        return data
+
+
 if __name__ == "__main__":
     datafile = '/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_MS_420_8835.pkl'
     data = pickle.load(open(datafile, 'r'))
