@@ -122,21 +122,20 @@ class ASD(DownscaleModel):
     def __init__(self, data, model=BackwardStepwiseRegression(), training_size=config.train_percent,
                  season=None, feature_columns=None, latdim='lat', londim='lon',
                  nearest_neighbor=True, ytransform=None, xtransform=None, num_proc=48):
-        DownscaleModel.__init__(self, data, model, training_size=config.train_percent, season=season)
+        DownscaleModel.__init__(self, data, model, training_size=training_size, season=season)
         self.nearest_neighbor = nearest_neighbor
         self.xtransform = xtransform
         self.ytransform = ytransform
         self.num_proc = num_proc
 
-    def _split_dataset(self, X, y, test_set=False):
+    def _split_dataset(self, X, test_set=False):
         if self.season:
             X = X[self.seasonidxs]
-            y = y[self.seasonidxs]
         idx = int(X.shape[0] * self.training_size)
         if test_set:
-            return X[idx:], y[idx:]
+            return X[idx:]
         else:
-            return X[:idx], y[:idx]
+            return X[:idx]
 
     def train(self, location=None):
         y, self.locations = self.data.get_y(location=location)
@@ -145,18 +144,25 @@ class ASD(DownscaleModel):
             self.xtrans = []
         if self.ytransform is not None:
             self.ytrans = []
+        if not self.nearest_neighbor:
+            X = self.data.get_X()
+            Xtrain = self._split_dataset(X)
+            if self.xtransform is not None:
+                self.xtrans = self.xtransform.fit(Xtrain)
+                Xtrain = self.xtrans.transform(Xtrain)
         for j, row in self.locations.iterrows():
             if self.nearest_neighbor:
-                X = data.get_nearest_X(row[self.data.reanalysis_latdim],
+                X = self.data.get_nearest_X(row[self.data.reanalysis_latdim],
                                    row[self.data.reanalysis_londim])
-            else:
-                X = data.get_X()
-            Xtrain, ytrain = self._split_dataset(X, y[:,j])
+                Xtrain = self._split_dataset(X)
+                if self.xtransform is not None:
+                    self.xtrans += [copy.deepcopy(self.xtransform)]
+                    self.xtrans[j].fit(Xtrain)
+                    Xtrain = self.xtrans[j].transform(Xtrain)
+
+            ytrain = self._split_dataset(y[:,j])
             ytrain = ytrain.reshape(-1,1)
-            if self.xtransform is not None:
-                self.xtrans += [copy.deepcopy(self.xtransform)]
-                self.xtrans[j].fit(Xtrain)
-                Xtrain = self.xtrans[j].transform(Xtrain)
+
             if self.ytransform is not None:
                 self.ytrans += [copy.deepcopy(self.ytransform)]
                 self.ytrans[j].fit(ytrain)
@@ -169,25 +175,29 @@ class ASD(DownscaleModel):
     def predict(self, test_set=True, location=None):
         Y, self.locations = self.data.get_y(location=location)
         t = self.data.observations['time'].values
-        t, _ = self._split_dataset(t, Y, test_set=test_set)
+        t = self._split_dataset(t,test_set=test_set)
+        Y = self._split_dataset(Y, test_set=test_set)
         yhat = []
         ytrue =[]
+        if not self.nearest_neighbor:
+            X = self.data.get_X()
+            X = self._split_dataset(X, test_set=test_set) 
+            if self.xtransform is not None:
+                X = self.xtrans.transform(X)
         for j, row in self.locations.iterrows():
             if self.nearest_neighbor:
-                X = data.get_nearest_X(row[self.data.reanalysis_latdim],
+                X = self.data.get_nearest_X(row[self.data.reanalysis_latdim],
                                    row[self.data.reanalysis_londim])
-            else:
-                X = data.get_X()
 
-            X, y = self._split_dataset(X, Y[:, j], test_set=test_set) 
-            if self.xtransform is not None:
-                X = self.xtrans[j].transform(X)
+                X = self._split_dataset(X, test_set=test_set) 
+                if self.xtransform is not None:
+                    X = self.xtrans[j].transform(X)
 
             yhat += [self.models[j].predict(X)]
             #print "Yhat range", numpy.min(yhat[-1]), numpy.max(yhat[-1])
             if self.ytransform is not None:
                 yhat[j] = self.ytrans[j].inverse_transform(yhat[j])
-            ytrue += [y]
+            ytrue += [Y[:, j]]
         yhat = numpy.vstack(yhat).T
         ytrue = numpy.vstack(ytrue).T
         yhat = self.to_xray(yhat, t).rename({"value": "projected"})
@@ -206,6 +216,28 @@ class ASD(DownscaleModel):
         data.set_index([self.data.obs_latdim, self.data.obs_londim, "time"], inplace=True)
         data = xray.Dataset.from_dataframe(data)
         return data
+
+    def project_gcm(self, gcm):
+        yhat = []
+        X, t = gcm.get_X(season=self.season)
+        nanrows = numpy.any(numpy.isnan(X), axis=1)
+        X = X[~nanrows]
+        t = t[~nanrows] 
+        if (not self.nearest_neighbor) and (self.xtransform is not None):
+            X = self.xtrans.transform(X)
+        for j, row in self.locations.iterrows():
+            if self.nearest_neighbor:
+                X, t = gcm.get_nearest_X(row[self.data.reanalysis_latdim],
+                                      row[self.data.reanalysis_londim], season=self.season)
+                X = X[~nanrows]
+                if self.xtransform is not None:
+                    X = self.xtrans[j].transform(X)
+            yhat += [self.models[j].predict(X)]
+            if self.ytransform is not None:
+                yhat[j] = self.ytrans[j].inverse_transform(yhat[j])
+        yhat = numpy.vstack(yhat).T
+        yhat = self.to_xray(yhat, t).rename(dict(value="projected_gcm"))
+        return yhat
 
 class ASDMultitask(DownscaleModel):
     def __init__(self, data, model, training_size=config.train_percent,
@@ -265,14 +297,17 @@ class ASDMultitask(DownscaleModel):
         data = xray.Dataset.from_dataframe(data)
         return data
 
+    def project_gcm(self, gcm):
+        X, t = gcm.get_X()
+        nanrows = numpy.any(numpy.isnan(X), axis=1)
+        X = X[~nanrows]
+        t = t[~nanrows] 
+        if self.xtransform is not None:
+            X = self.xtransform.transform(X)
+        yhat = self.model.predict(X)
+        if self.ytransform is not None:
+            yhat = self.ytransform.inverse_transform(yhat)
+        yhat = self.to_xray(yhat, t) 
+        yhat = yhat.rename({"value": "projected_gcm"})
+        return yhat
 
-if __name__ == "__main__":
-    datafile = '/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_MS_420_8835.pkl'
-    data = pickle.load(open(datafile, 'r'))
-#    linear_models = [LassoCV(), BackwardStepwiseRegression()]
-    season = 'SON'
-    model = ASD(data, nearest_neighbor=False, model=LassoCV(), season=season, xtransform=StandardScaler(), 
-                ytransform=StandardScaler(), num_proc=48)
-    model.train()
-    predicted = model.predict(test_set=True)
-    predicted.to_netcdf("asd_MS_NE_%s_%s.nc" % (season, model.model.__class__.__name__))
