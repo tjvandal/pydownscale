@@ -31,7 +31,6 @@ class BackwardStepwiseRegression():
             n2 * numpy.log(1/(2*n2) * residuals.T.dot(residuals)) - n2
         return l
 
-
     def BIC(self, X, y):
         n = len(y)*1.
         df = X.shape[1]-1
