@@ -4,6 +4,7 @@ import os, time, sys
 import numpy
 import pandas
 from scipy.misc import factorial
+import config
 
 '''
 Lets let reanalysis be a list of xray datasets where the time axis matches but may have different levels
@@ -28,7 +29,7 @@ class DownscaleData:
     def _check_reanalysis(self):
 		for _, n in self.reanalysis.iteritems():
 			if (not isinstance(n, xray.Dataset)) and (not isinstance(n, xray.DataArray)):
-				raise TypeError("Ncep should be a list of xray datasets or dataarrays.")
+				raise TypeError("Reanalysis Data should be a list of xray datasets or dataarrays.")
 
 	# can we make this dynamic in the future?
     def _checkindices(self):
@@ -36,38 +37,22 @@ class DownscaleData:
         for _, d in self.reanalysis.iteritems():
             if not 'time' in d.dims:
                 raise IndexError("time should be a dimension of cmip")
-            times.append(d.time.values)
-            print _, d.time.values.dtype, d.time.values.shape
-
-        times = numpy.vstack(times)
-        if numpy.sum(times[0] - times).item() != 0:
-            raise IndexError("All times in lowres data should be identical.")
 
         if not 'time' in self.observations.dims:
             raise IndexError("time should be a dimension of observations")
 
 	# Line up datasets so that the times match.  Exclude observations outside of the timeframe.
     def _matchdates(self):
-        key1 = self.reanalysis.keys()[0]
-        mintime = max(self.reanalysis[key1].time.min(), self.observations.time.min())
-        maxtime = min(self.reanalysis[key1].time.max(), self.observations.time.max())
-
-        cmiptimes = (self.reanalysis[key1].time >= mintime) & (self.reanalysis[key1].time <= maxtime)
-        obstimes = (self.observations.time >= mintime) & (self.observations.time <= maxtime)
-        time_intersection = numpy.intersect1d(self.reanalysis[key1].time.values,
-                                              self.observations.time.values)
-
-        for key in self.reanalysis:
-            #self.reanalysis[key] = self.reanalysis[key].loc[dict(time=self.reanalysis[key].time[cmiptimes])]
-            self.reanalysis[key] = self.reanalysis[key].loc[dict(time=time_intersection)]
-
-        #self.observations = self.observations.loc[dict(time=self.observations.time[obstimes])]
-        self.observations = self.observations.loc[dict(time=time_intersection)]
-
-        if (len(self.reanalysis[key1].time) != len(self.observations.time)) or \
-                sum(self.reanalysis[key1].time == self.observations.time) != len(self.reanalysis[key1].time):
-                print self.reanalysis[key1].time, self.observations.time
-                raise IndexError("times do not match.  add functionality if this is not an error")
+        obstime = self.observations.time.values
+        reanalysistimes = []
+        for var in config.reanalysisvars:
+            reanalysistimes.append(self.reanalysis[var].time.values)
+        timeset = obstime
+        for j, val in enumerate(reanalysistimes):
+            timeset = numpy.intersect1d(timeset, val)
+        self.observations = self.observations.loc[{'time': timeset}]
+        for j, var in enumerate(config.reanalysisvars):
+            self.reanalysis[var] = self.reanalysis[var].loc[{'time': timeset}]
 
     def get_X(self, timedim='time'):
         import config
@@ -87,10 +72,10 @@ class DownscaleData:
             self.reanalysis[var].load()
             lats = self.reanalysis[var][self.reanalysis_latdim].values
             lons = self.reanalysis[var][self.reanalysis_londim].values
-            latbelow = numpy.where(lats < latval)[0][-1]
-            latabove = numpy.where(lats > latval)[0][0]
-            lonbelow = numpy.where(lons < lonval)[0][-1]
-            lonabove = numpy.where(lons > lonval)[0][0]
+            latbelow = numpy.where(lats < latval)[0][-2]
+            latabove = numpy.where(lats > latval)[0][1]
+            lonbelow = numpy.where(lons < lonval)[0][-2]
+            lonabove = numpy.where(lons > lonval)[0][1]
             subset = self.reanalysis[var][{self.reanalysis_latdim: slice(latbelow, latabove+1), 
                                            self.reanalysis_londim: slice(lonbelow, lonabove+1)}]
             df = subset.to_array().to_dataframe()
@@ -158,9 +143,21 @@ class DownscaleData:
 class GCMData:
     def __init__(self, data):
         self.data = data
+        self._matchdates()
+
+    def _matchdates(self):
+        times = []
+        for var in config.gcmvars:
+            times.append(self.data[var].time.values)
+        timeset = times[0]
+        for t in times[1:]:
+            timeset = numpy.intersect1d(timeset, t)
+        for j, var in enumerate(config.gcmvars):
+            tvar = numpy.in1d(times[j], timeset)
+            self.data[var] = self.data[var].loc[{'time': timeset}]
+
 
     def get_X(self, timedim='time', season=None):
-        import config
         x = []
         for var in config.gcmvars:
             self.data[var].load()
@@ -174,6 +171,25 @@ class GCMData:
             x = x[seasonidxs, :]
 
         return x
+
+    def get_nearest_X(self, latval, lonval, timedim='time'):
+        x = []
+        for var in config.gcmvars:
+            self.data[var].load()
+            lats = self.data[var][config.gcm_latdim].values
+            lons = self.data[var][config.gcm_londim].values
+            latbelow = numpy.where(lats < latval)[0][-2]
+            latabove = numpy.where(lats > latval)[0][1]
+            lonbelow = numpy.where(lons < lonval)[0][-2]
+            lonabove = numpy.where(lons > lonval)[0][1]
+            subset = self.data[var][{config.gcm_latdim: slice(latbelow, latabove+1), 
+                                           config.gcm_londim: slice(lonbelow, lonabove+1)}]
+            df = subset.to_array().to_dataframe()
+            levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
+            x.append(df.unstack(levels).values)
+        x = numpy.column_stack(x)
+        return x
+
 
 def get_reanalysis_file_paths(basedir):
     files = []
@@ -281,8 +297,10 @@ def read_lowres_data(how='MS', which='reanalysis'):
             del d['time_bnds']
         if 'bnds' in d.keys():
             del d['bnds']
-
         d = d.resample(how, 'time', how='mean')
+        print v, "Before Drop", d[v].size
+        d = d.dropna('time')
+        print v, "After Drop", d[v].size
         lowres[v] = d
 
     return lowres
@@ -319,7 +337,7 @@ def test_transformation():
 if __name__ == "__main__":
     import config
     import pickle
-    how = "MS"
+    how = "D"
     print "reading reanalysis"
     reanalysis = read_lowres_data(which='reanalysis', how=how)
     print "reading observations"
@@ -328,26 +346,27 @@ if __name__ == "__main__":
     times = obs['time'][rows]
     print "time skipped", obs['time'][~rows]
     obs = obs.loc[{'time': times}]
-    obs = obs.resample(how, dim='time', how='mean')
+    #obs = obs.resample(how, dim='time', how='mean')
 
     D = DownscaleData(reanalysis, obs)
     X = D.get_X()
+
+    fname = "newengland_%s_%i_%i.pkl" % (how, X.shape[0], X.shape[1])
+    f = os.path.join(config.save_dir, "DownscaleData", fname)
+    pickle.dump(D, open(f, 'w'))
     y, loc = D.get_y()
 
     print "Number of Tasks:", len(D.location_pairs("lat", "lon"))
     print "Shape of X:", X.shape
-    fname = "newengland_%s_%i_%i.pkl" % (how, X.shape[0], X.shape[1])
-    f = os.path.join(config.save_dir, "DownscaleData", fname)
-    pickle.dump(D, open(f, 'w'))
     print "Saved for file: %s" % f
     '''
+    gcmf = "/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/ccsm4_historical_%s.pkl" % how
+    #G = pickle.load(open(gcmf, "r"))
     gcm = read_lowres_data(which='gcm', how=how)
     G = GCMData(gcm)
+    pickle.dump(G, open(gcmf, "w"))
     GX = G.get_X()
     print "SHAPE OF GCM X:", GX.shape
-    ''' 
-    datafile = '/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_daily_12783_720.pkl'
-    data = pickle.load(open(datafile, 'r'))
-    locations = data.location_pairs("lat", "lon")
-    Xnear = data.get_nearest_X(locations[0][0], locations[0][1])
-    X = data.get_X()
+    GXN = G.get_nearest_X(42.125, 360-71)
+    print "Shape of nearest:", GXN.shape
+    '''
