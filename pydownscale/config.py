@@ -4,16 +4,25 @@ reanalysis_dir = "/gss_gpfs_scratch/vandal.t/merra_2/daily_merged/"
 obs_dir = "/gss_gpfs_scratch/vandal.t/cpc/regions/"
 #obs_dir = "/gss_gpfs_scratch/vandal.t/gmfd/prcp/daily/0.25deg/"
 
-gcm_dir = "/gss_gpfs_scratch/vandal.t/cmip5/historical/atm/mon/ccsm/remap/"
+gcm_dir = "/gss_gpfs_scratch/vandal.t/cmip5/historical/atm/day/ccsm4/remap/"
 save_dir = "/gss_gpfs_scratch/vandal.t/experiments/"
 
+reanalysis_londim = 'lon'
+reanalysis_latdim = 'lat'
+
+obs_londim = 'lon'
+obs_latdim = 'lat'
+
+gcm_latdim = 'lat'
+gcm_londim = 'lon'
+
 # New England Bounds
-lowres_bounds = {'lat': [35, 55], 'lon': [270, 310]}
-highres_bounds = {'lat': [41, 47], 'lon': [360-74,360-67]}
+lowres_bounds = {reanalysis_latdim: [35, 55], reanalysis_londim: [270, 310]}
+highres_bounds = {obs_latdim: [41, 47], obs_londim: [360-74,360-67]}
 
 #Test Small Data
-#lowres_bounds = {'lat': [40, 45], 'lon': [280, 300]}
-#highres_bounds = {'lat': [42, 43], 'lon': [288, 290]}
+#lowres_bounds = {reanalysis_latdim: [40, 45], reanalysis_londim: [280, 300]}
+#highres_bounds = {obs_latdim: [42, 43], obs_londim: [288, 290]}
 
 # United States Bounds
 #lowres_bounds = {'lat': [20, 55], 'lon': [360-133, 310]}
@@ -25,6 +34,8 @@ seasons = ['DJF', 'MAM', 'JJA', 'SON']
 reanalysislevels = [500, 700, 850]
 gcmlevels = [50000, 70000, 85000]
 
-reanalysisvars = ['T', 'U', 'V', 'H'] # 'TS', 'U2M', 'V2M', 'PS', 'SLP']
-gcmvars = ['ta', 'ua', 'va', 'hur', 'psl']
+## Temperature, Horizontal wind, vertical wind, surface temperature, sea level pressure,
+##   specific humidity, surface specific humidity
+reanalysisvars = [ 'T', 'U', 'V', 'TS', 'SLP', 'QV', 'TQV']
+gcmvars = ['ta', 'ua', 'va', 'tas', 'psl', 'hus', 'huss']
 
