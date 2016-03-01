@@ -148,7 +148,8 @@ class ASD(DownscaleModel):
             X = self.data.get_X()
             Xtrain = self._split_dataset(X)
             if self.xtransform is not None:
-                self.xtrans = self.xtransform.fit(Xtrain)
+                self.xtrans = self.xtransform
+                self.xtrans.fit(Xtrain)
                 Xtrain = self.xtrans.transform(Xtrain)
         for j, row in self.locations.iterrows():
             if self.nearest_neighbor:
@@ -167,9 +168,8 @@ class ASD(DownscaleModel):
                 self.ytrans += [copy.deepcopy(self.ytransform)]
                 self.ytrans[j].fit(ytrain)
                 ytrain = self.ytrans[j].transform(ytrain)
-            jobs.append(delayed(asd_worker)(copy.deepcopy(self.model), Xtrain.copy(),
-                                            ytrain.flatten().copy()))
-        t = time.time()
+            jobs.append(delayed(asd_worker)(copy.deepcopy(self.model), Xtrain,
+                                            ytrain.flatten()))
         self.models = Parallel(n_jobs=self.num_proc)(jobs)
 
     def predict(self, test_set=True, location=None):
@@ -243,7 +243,7 @@ class ASDMultitask(DownscaleModel):
     def __init__(self, data, model, training_size=config.train_percent,
                  season=None, feature_columns=None,
                  ytransform=None, xtransform=None):
-        DownscaleModel.__init__(self, data, model, training_size=config.train_percent, season=season)
+        DownscaleModel.__init__(self, data, model, training_size=training_size, season=season)
         self.xtransform = xtransform
         self.ytransform = ytransform
 
