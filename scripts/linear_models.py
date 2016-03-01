@@ -1,5 +1,4 @@
 import sys
-sys.path.append("/home/vandal.t/repos/pydownscale")
 import numpy
 from pydownscale.data import DownscaleData
 from pydownscale import config
