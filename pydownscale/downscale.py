@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LassoCV
 
 class DownscaleModel:
-    def __init__(self, data, model, training_size=config.train_percent, season=None, feature_columns=None):
+    def __init__(self, data, model, max_train_year=config.train_percent, season=None, feature_columns=None):
         if data.__class__.__name__ != 'DownscaleData':
             raise TypeError("Data must be of type downscale data.")
         if not hasattr(model, "fit") or not hasattr(model, "predict"):
@@ -24,43 +24,12 @@ class DownscaleModel:
         self.model = model
         self.season = season
         self.feature_columns = feature_columns
-        self.training_size = training_size
+        self.max_train_year = max_train_year
         if self.season:
             key0 = self.data.reanalysis.keys()[0]
             self.seasonidxs = numpy.where(self.data.reanalysis[key0]['time.season'] == self.season)[0]
 
-
-    def _split_dataset(self):
-        if self.feature_columns is not None:
-            X = self.data.get_X()[:, self.feature_columns]
-        else:
-            X = self.data.get_X()
-
-        if self.season:
-            X = X[self.seasonidxs, :]
-
-        self.numtrain = int(X.shape[0] * self.training_size)
-        self.X_train = X[:self.numtrain]
-        self.X_test = X[self.numtrain:]
-
-
     # include quantile mapping ability
-    def train(self, location=None):
-        self._split_dataset()
-        start_time = time.time()
-        y, self.location = self.data.get_y(location=location)
-        t = self.data.observations['time'].values
-        if self.season:
-            y = y[self.seasonidxs]
-            t = t[self.seasonidxs]
-
-        self.y_train = y[:self.numtrain]
-        self.y_test = y[self.numtrain:]
-        self.model.fit(self.X_train, self.y_train)
-        self.yhat_train = self.model.predict(self.X_train)
-        self.yhat_test = self.model.predict(self.X_test)
-        self.t_test = t[self.numtrain:]
-
     def get_mse(self, y, yhat):
         return numpy.mean((y - yhat) ** 2)
 
@@ -111,18 +80,17 @@ class DownscaleModel:
 
         return results
 
-    def predict(self, X):
-        pass
 
 def asd_worker(model, X, y):
     model.fit(X, y)
     return model
 
 class ASD(DownscaleModel):
-    def __init__(self, data, model=BackwardStepwiseRegression(), training_size=config.train_percent,
+    def __init__(self, data, model=BackwardStepwiseRegression(),
                  season=None, feature_columns=None, latdim='lat', londim='lon',
-                 nearest_neighbor=True, ytransform=None, xtransform=None, num_proc=48):
-        DownscaleModel.__init__(self, data, model, training_size=training_size, season=season)
+                 nearest_neighbor=True, ytransform=None, xtransform=None, num_proc=48, 
+                max_train_year=config.max_train_year):
+        DownscaleModel.__init__(self, data, model, max_train_year=max_train_year, season=season)
         self.nearest_neighbor = nearest_neighbor
         self.xtransform = xtransform
         self.ytransform = ytransform
@@ -131,11 +99,11 @@ class ASD(DownscaleModel):
     def _split_dataset(self, X, test_set=False):
         if self.season:
             X = X[self.seasonidxs]
-        idx = int(X.shape[0] * self.training_size)
+        idx = self.data.observations['time.year'][self.seasonidxs] <= self.max_train_year
         if test_set:
-            return X[idx:]
+            return X[numpy.where(~idx)[0]]
         else:
-            return X[:idx]
+            return X[numpy.where(idx)[0]]
 
     def train(self, location=None):
         y, self.locations = self.data.get_y(location=location)
@@ -155,7 +123,7 @@ class ASD(DownscaleModel):
             if self.nearest_neighbor:
                 X = self.data.get_nearest_X(row[self.data.reanalysis_latdim],
                                    row[self.data.reanalysis_londim])
-                Xtrain = self._split_dataset(X)
+                Xtrain = self._split_dataset(X, test_set=False)
                 if self.xtransform is not None:
                     self.xtrans += [copy.deepcopy(self.xtransform)]
                     self.xtrans[j].fit(Xtrain)
@@ -175,7 +143,7 @@ class ASD(DownscaleModel):
     def predict(self, test_set=True, location=None):
         Y, self.locations = self.data.get_y(location=location)
         t = self.data.observations['time'].values
-        t = self._split_dataset(t,test_set=test_set)
+        t = self._split_dataset(t, test_set=test_set)
         Y = self._split_dataset(Y, test_set=test_set)
         yhat = []
         ytrue =[]
@@ -240,27 +208,31 @@ class ASD(DownscaleModel):
         return yhat
 
 class ASDMultitask(DownscaleModel):
-    def __init__(self, data, model, training_size=config.train_percent,
+    def __init__(self, data, model, max_train_year=config.train_percent,
                  season=None, feature_columns=None,
                  ytransform=None, xtransform=None):
-        DownscaleModel.__init__(self, data, model, training_size=training_size, season=season)
+        DownscaleModel.__init__(self, data, model, max_train_year=max_train_year, season=season)
         self.xtransform = xtransform
         self.ytransform = ytransform
 
     def _split_dataset(self, X, y, test_set=False):
+        year = self.data.observations['time.year']
         if self.season:
             X = X[self.seasonidxs]
             y = y[self.seasonidxs]
-        idx = int(X.shape[0] * self.training_size)
+            year = year[self.seasonidxs]
+
+        idx = (year <= self.max_train_year)
         if test_set:
-            return X[idx:], y[idx:]
+            return X[numpy.where(~idx)[0]], y[numpy.where(~idx)[0]]
         else:
-            return X[:idx], y[:idx]
+            return X[numpy.where(idx)[0]], y[numpy.where(idx)[0]]
 
     def train(self):
         y, self.locations = self.data.get_y()
         X = self.data.get_X()
-        Xtrain, ytrain = self._split_dataset(X, y) 
+        t = self.data.observations['time'].values
+        Xtrain, ytrain = self._split_dataset(X, y, test_set=False) 
         if self.xtransform is not None:
             self.xtransform.fit(Xtrain)
             Xtrain = self.xtransform.transform(Xtrain)
@@ -274,7 +246,7 @@ class ASDMultitask(DownscaleModel):
         t = self.data.observations['time'].values
         X = self.data.get_X()
         t, _ = self._split_dataset(t, y, test_set=test_set)
-        X, y = self._split_dataset(X, y) 
+        X, y = self._split_dataset(X, y, test_set=test_set) 
         if self.xtransform is not None:
             X = self.xtransform.transform(X)
         yhat = self.model.predict(X)

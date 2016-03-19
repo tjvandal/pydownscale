@@ -65,6 +65,20 @@ class DownscaleData:
         x = numpy.column_stack(x)
         return x
 
+    def get_XTensor(self, timedim='time'):
+        XT = []
+        for var in self.reanalysis:
+            xv = self.reanalysis[var][var].values
+            if len(xv.shape)==4:
+                xv = numpy.swapaxes(xv, 1, 3)
+                xv = numpy.swapaxes(xv, 1, 2)
+            elif len(xv.shape) == 3:
+                xv = xv[:, :, :, numpy.newaxis]
+            XT.append(xv)
+
+        XT = numpy.concatenate(XT, axis=3)
+        return XT
+
     def get_nearest_X(self, latval, lonval, timedim='time'):
         import config
         x = []
