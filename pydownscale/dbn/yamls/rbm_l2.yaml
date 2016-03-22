@@ -1,0 +1,32 @@
+!obj:pylearn2.train.Train {
+    dataset: &train !obj:pylearn2.datasets.transformer_dataset.TransformerDataset {
+            raw: !obj:load_data.load_pretraining {
+                 season: %(season)s,
+            } ,
+            transformer: !pkl: "models/grbm_l1_%(h1)i_%(season)s.pkl"
+        },
+       model: !obj:pylearn2.models.rbm.RBM {
+        nvis : %(h1)i,
+        nhid : %(h2)i,
+        irange : 0.05,
+        #init_bias_hid : 0.0,
+    },
+    algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+        learning_rate : 1e-2,
+        batch_size : 50,
+        #monitoring_batches : 20,
+        monitoring_dataset : *train,
+        cost : !obj:pylearn2.costs.cost.SumOfCosts {
+            costs: [
+                !obj:pylearn2.costs.ebm_estimation.CDk {
+                   # Here we specify how many fantasy particles to maintain
+                   nsteps: 5},
+            ]
+        },
+        termination_criterion : !obj:pylearn2.termination_criteria.EpochCounter {
+            max_epochs: 500,
+        },
+    },
+    save_path: "models/rbm_l2_%(h1)i_%(h2)i_%(season)s.pkl",
+    save_freq: 25 
+}
