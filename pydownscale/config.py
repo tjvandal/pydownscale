@@ -28,7 +28,8 @@ highres_bounds = {obs_latdim: [41, 47], obs_londim: [360-74,360-67]}
 #lowres_bounds = {'lat': [20, 55], 'lon': [360-133, 310]}
 #highres_bounds = {'lat': [20, 55], 'lon': [360-133, 360-50]}
 
-train_percent = 0.67
+train_percent = 0.70
+max_train_year = 2004
 
 seasons = ['DJF', 'MAM', 'JJA', 'SON']
 reanalysislevels = [500, 700, 850]
