@@ -78,6 +78,14 @@ class BoxcoxTransform():
                 xinv[:, j] = inv_boxcox(xtemp[:, j], lmb)
         return xinv #- self.shift 
 
+def qmap(x, y, step=0.01):
+    steps = numpy.arange(0, 100, step)
+    x_map = numpy.percentile(x, steps)
+    y_map = numpy.percentile(y, steps)
+    idx = [numpy.abs(val - y_map).argmin() for val in y]
+    return x_map[idx]
+
+
 if __name__ == "__main__":
     from matplotlib import pyplot
     import numpy
