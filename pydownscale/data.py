@@ -108,10 +108,8 @@ class DownscaleData:
             location = y.columns.to_series()
             y = y.values
             ycolmean = y.mean(axis=0)
-            ybelow = (y >= 0).mean(axis=0)
-            idx = numpy.where(ybelow != 1)[0][-1]
-            idx2 = numpy.where(y[:, idx] == -999.)[0]
-            cols = (ycolmean !=0 ) * (ybelow == 1.) * (~numpy.isnan(ycolmean))
+            ybelow = (y != -999.).mean(axis=0)
+            cols = (ycolmean != 0 ) * (ybelow == 1.) * (~numpy.isnan(ycolmean))
             y = y[:, cols]
             location = location[cols]
             names = location.index.names
@@ -361,10 +359,7 @@ if __name__ == "__main__":
     reanalysis = read_lowres_data(which='reanalysis', how=how)
     print "reading observations"
     obs = read_obs(how='D')  # we are in mm
-    rows = ((obs == -999).mean(dim=('lat', 'lon'))['precip']) < 0.20    # delete those with lots of 999.s 
-    times = obs['time'][rows]
-    print "time skipped", obs['time'][~rows]
-    obs = obs.loc[{'time': times}]
+    obs = obs.dropna('time', how='all')
     #obs = obs.resample(how, dim='time', how='mean')
 
     D = DownscaleData(reanalysis, obs)
