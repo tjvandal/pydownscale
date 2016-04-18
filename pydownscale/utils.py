@@ -2,6 +2,7 @@ import numpy
 import sys
 from scipy.stats import boxcox
 from scipy.special import inv_boxcox
+from sklearn.preprocessing import StandardScaler
 
 def center_frob(x):
     x_mean = x.mean(axis=0)
@@ -16,17 +17,35 @@ class LogTransform():
     def fit(self,X):
         if numpy.any(X < 0):
             raise ValueError("Log Transform: All values must be greater than or equal to zero")
-        xlog = numpy.log(X+1e-10)
-        self.xmean = xlog.mean(axis=0)
-        self.xstd = xlog.std(axis=0)
+        #xlog = numpy.log(X+1e-10)
+        xlog = (X+1e-10)**0.5
+        self.scale = StandardScaler().fit(xlog)
 
     def transform(self,X):
-        xlog = numpy.log(X+1e-10)
-        return (xlog - self.xmean)/self.xstd
+        return self.scale.transform(numpy.sqrt(X+1e-10))
 
     def inverse_transform(self,X):
-        xinv = X*self.xstd + self.xmean
-        xinv = numpy.exp(xinv)-1e-10
+        xinv = self.scale.inverse_transform(X)
+        #xinv = numpy.exp(xinv)-1e-10
+        xinv = xinv ** 2 - 1e-10
+        return xinv
+
+class RootTransform():
+    def __init__(self, root=0.5):
+        self.root = root
+
+    def fit(self,X):
+        if numpy.any(X < 0):
+            raise ValueError("Log Transform: All values must be greater than or equal to zero")
+        xlog = (X+1e-10)**self.root
+        self.scale = StandardScaler().fit(xlog)
+
+    def transform(self,X):
+        return self.scale.transform((X+1e-10) ** self.root)
+
+    def inverse_transform(self,X):
+        xinv = self.scale.inverse_transform(X)
+        xinv = xinv ** (1/self.root) - 1e-10
         return xinv
 
 class BoxcoxTransform():
@@ -90,12 +109,9 @@ if __name__ == "__main__":
     from matplotlib import pyplot
     import numpy
     x = numpy.random.lognormal(0, 1, size = (10,100))
-    trans = BoxcoxTransform()
+    trans = RootTransform(0.25)
     trans.fit(x)
     xtran = trans.transform(x)
     xinvtran = trans.inverse_transform(xtran)
-    pyplot.subplot(2,1,1)
-    pyplot.hist(x.flatten())
-    pyplot.subplot(2,1,2)
-    pyplot.hist(xtran.flatten())
+    pyplot.scatter(x, xinvtran)
     pyplot.show()
