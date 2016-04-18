@@ -80,21 +80,34 @@ class DownscaleModel:
 
         return results
 
-
 def asd_worker(model, X, y):
     model.fit(X, y)
     return model
 
+def occurance_worker(model, X, y):
+    return model.fit(X, y)
+
+def worker_predict(model, X):
+    return model.predict(X)
+
+def worker_predict_prob(model, X):
+    return model.predict_proba(X)[:,1]
+
+def worker_invtrans(model, x):
+    return model.inverse_transform(x)
+
 class ASD(DownscaleModel):
     def __init__(self, data, model=BackwardStepwiseRegression(),
                  season=None, feature_columns=None, latdim='lat', londim='lon',
-                 nearest_neighbor=True, ytransform=None, xtransform=None, num_proc=48, 
-                max_train_year=config.max_train_year):
+                 nearest_neighbor=True, ytransform=None, xtransform=None, num_proc=1, 
+                max_train_year=config.max_train_year, conditional=None, cond_thres=None):
         DownscaleModel.__init__(self, data, model, max_train_year=max_train_year, season=season)
         self.nearest_neighbor = nearest_neighbor
         self.xtransform = xtransform
         self.ytransform = ytransform
         self.num_proc = num_proc
+        self.conditional = conditional
+        self.cond_thres = cond_thres
 
     def _split_dataset(self, X, test_set=False):
         if self.season:
@@ -108,6 +121,7 @@ class ASD(DownscaleModel):
     def train(self, location=None):
         y, self.locations = self.data.get_y(location=location)
         jobs = []
+        cond_jobs = []
         if self.xtransform is not None:
             self.xtrans = []
         if self.ytransform is not None:
@@ -131,22 +145,34 @@ class ASD(DownscaleModel):
 
             ytrain = self._split_dataset(y[:,j])
             ytrain = ytrain.reshape(-1,1)
+            # Threshold before transformation
+            if self.conditional is not None:
+                cond_jobs += [delayed(occurance_worker)(copy.deepcopy(self.conditional),
+                              Xtrain, ytrain.flatten() >= self.cond_thres)]
+                occur_rows = ytrain.flatten() >= self.cond_thres
+            else:
+                occur_rows = [True] * ytrain.shape[0] 
 
             if self.ytransform is not None:
                 self.ytrans += [copy.deepcopy(self.ytransform)]
-                self.ytrans[j].fit(ytrain)
+                self.ytrans[j].fit(ytrain[occur_rows])
                 ytrain = self.ytrans[j].transform(ytrain)
-            jobs.append(delayed(asd_worker)(copy.deepcopy(self.model), Xtrain,
-                                            ytrain.flatten()))
+            jobs.append(delayed(asd_worker)(copy.deepcopy(self.model), Xtrain[occur_rows],
+                                            ytrain.flatten()[occur_rows]))
+        print "training models"
         self.models = Parallel(n_jobs=self.num_proc)(jobs)
+        if self.conditional is not None:
+            print "training occurance"
+            self.occurance_models = Parallel(n_jobs=self.num_proc)(cond_jobs)
 
     def predict(self, test_set=True, location=None):
         Y, self.locations = self.data.get_y(location=location)
         t = self.data.observations['time'].values
         t = self._split_dataset(t, test_set=test_set)
         Y = self._split_dataset(Y, test_set=test_set)
-        yhat = []
+        yhat_jobs = []
         ytrue =[]
+        yoccur_jobs = []
         if not self.nearest_neighbor:
             X = self.data.get_X()
             X = self._split_dataset(X, test_set=test_set) 
@@ -160,17 +186,30 @@ class ASD(DownscaleModel):
                 X = self._split_dataset(X, test_set=test_set) 
                 if self.xtransform is not None:
                     X = self.xtrans[j].transform(X)
+            if self.conditional is not None:
+                yoccur_jobs += [delayed(worker_predict_prob)(self.occurance_models[j], copy.deepcopy(X))]
 
-            yhat += [self.models[j].predict(X)]
-            #print "Yhat range", numpy.min(yhat[-1]), numpy.max(yhat[-1])
-            if self.ytransform is not None:
-                yhat[j] = self.ytrans[j].inverse_transform(yhat[j])
+            yhat_jobs += [delayed(worker_predict)(self.models[j], copy.deepcopy(X))]
             ytrue += [Y[:, j]]
+
+        yhat = Parallel(n_jobs=self.num_proc)(yhat_jobs)
+        if self.ytransform is not None:
+            transform_jobs = [delayed(worker_invtrans)(self.ytrans[j], yhat[j]) for j in
+                                                       range(len(yhat))]
+            yhat = Parallel(n_jobs=self.num_proc)(transform_jobs)
+
         yhat = numpy.vstack(yhat).T
         ytrue = numpy.vstack(ytrue).T
         yhat = self.to_xray(yhat, t).rename({"value": "projected"})
         ytrue = self.to_xray(ytrue, t).rename({"value": "ground_truth"})
-        out = yhat.merge(ytrue)
+        if self.conditional is not None:
+            yoccur = Parallel(n_jobs=self.num_proc)(yoccur_jobs)
+            yoccur = numpy.vstack(yoccur).T
+            yoccur = self.to_xray(yoccur, t).rename({"value": "occurance"})
+            yhat['projected'] = yhat['projected']*yoccur['occurance']
+            yhat = yhat.merge(yoccur)
+
+        out = yhat.merge(ytrue) 
         out['error'] = out.projected - out.ground_truth
         return out
 
@@ -283,3 +322,15 @@ class ASDMultitask(DownscaleModel):
         yhat = yhat.rename({"value": "projected_gcm"})
         return yhat
 
+if __name__ == "__main__": 
+    import pickle
+    from sklearn.linear_model import LinearRegression, LogisticRegression
+    from sklearn.decomposition import PCA
+    f = "/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_D_12781_8835.pkl"
+    data = pickle.load(open(f, 'r'))
+    asd = ASD(data, model=LinearRegression(),xtransform=PCA(n_components=0.98), season='JJA',
+             conditional=LogisticRegression(), cond_thres=10., num_proc=40) 
+    asd.train()
+    print "predicting"
+    yhat = asd.predict()
+    print yhat
