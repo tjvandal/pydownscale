@@ -63,7 +63,7 @@ class DownscaleData:
             levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
             x.append(df.unstack(levels).values)
         x = numpy.column_stack(x)
-        return x
+        return x.astype("float32")
 
     def get_XTensor(self, timedim='time'):
         XT = []
@@ -117,7 +117,7 @@ class DownscaleData:
             dim2idx = names.index(self.obs_londim)
             locs = [[row[dim1idx], row[dim2idx]] for row in location.values]
             location = pandas.DataFrame(numpy.vstack(locs), columns=[self.obs_latdim, self.obs_londim])
-        return y, location
+        return y.astype("float32"), location
 
     def location_pairs(self, dim1, dim2):
         Y = self.observations.to_array()

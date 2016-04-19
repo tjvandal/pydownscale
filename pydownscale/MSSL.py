@@ -11,6 +11,7 @@ import time
 import utils
 from joblib import Parallel, delayed
 from sklearn import preprocessing
+from scipy.optimize import minimize
 EPSABS = 1e-2
 EPSREL = 1e-4
 
@@ -247,7 +248,6 @@ class WFista:
     def predict(self, X):
         return X.dot(self.values)
 
-
 class WMPIDistributed:
     def __init__(self, lambd, gamma, shape, rho=1., 
                 maxepoch=100, maxepoch_inner=100, quiet=True, 
@@ -418,9 +418,6 @@ class WADMM:
     def predict(self, X):
         return X.dot(self.values)
 
-        
-
-#thetai = Theta[self.feat, :].copy()
 def compute_b(xi, thetai, Zbar, XWbar, U):
     return xi.dot(thetai) + Zbar - XWbar - U
 
@@ -450,18 +447,23 @@ def _w_update(x, w, Omega, b, rho, gamma, maxepochs=25):
 
     return z
 
-def zbar_loss(zbar, xwbar, y, omega, rho, u, N):
-    n, K = xwbar.shape
-    zbar = zbar.reshape(n, K)
-    loss = 0.5 * numpy.trace(y * (N*zbar - numpy.log(1+numpy.exp(N*zbar))) + (y-1) * numpy.log(1 + numpy.exp(N*zbar)))
-    loss += rho / 2 * numpy.linalg.norm(zbar - xwbar + u, 'fro')
+def zbar_loss(zbar, xwbar, y, rho, u, N):
+    if xwbar.ndim == 2:
+        n, K = xwbar.shape
+        zbar = zbar.reshape(n, K)
+    tmp = 0.5 * y * (N*zbar - numpy.log(1+numpy.exp(N*zbar))) + (y-1) * numpy.log(1 + numpy.exp(N*zbar)) 
+    if xwbar.ndim == 2:
+        loss = numpy.trace(tmp)
+    else:
+        loss = numpy.sum(tmp)
+    loss += rho / 2 * numpy.linalg.norm(zbar - xwbar + u, 2)**2
     return -loss
 
-def zbar_gradient(zbar, xwbar, y, omega, rho, u, N):
-    n, K = xwbar.shape
-    zbar = zbar.reshape(n, K)
+def zbar_gradient(zbar, xwbar, y, rho, u, N):
+    if xwbar.ndim == 2:
+        n, K = xwbar.shape
+        zbar = zbar.reshape(n, K)
     sig_s = sigmoid(N*zbar)
-    #grad = 0.5 * X.dot(X.T).dot(sig_s - y)
     grad = 0.5 * (sig_s - y)
     grad += rho * (zbar - xwbar + u)
     return grad.flatten()
@@ -486,7 +488,7 @@ class WADMMMultiProcessor:
         self.num_proc = num_proc
         self.size = num_proc
         self.how = how
-    
+
     def update(self, X, Y, Omega):
         ## Intialize Variables
         self.prev_w = self.values.copy()
@@ -504,7 +506,7 @@ class WADMMMultiProcessor:
 
         for k in range(self.maxepoch):
             Zbar_prev = Zbar.copy()
-            
+
             # compute the theta update
             bs = Parallel(n_jobs=self.num_proc)(
                 delayed(compute_b)(X[:,feat], Theta[feat,:], Zbar, XWbar, U) for feat in feature_split)
@@ -520,10 +522,13 @@ class WADMMMultiProcessor:
                 temp =  self.rho * (XWbar + U) + Y
                 Zbar = temp / (self.size + self.rho )
             elif self.how =='classify':
-                Zbar = minimize(zbar_loss, Zbar_prev, jac=zbar_gradient, args=(XWbar, Y, Omega, self.rho, U, self.num_proc)).x
-                #Zbar = minimize(zbar_loss, Zbar_prev, args=(XWbar, Y, Omega, self.rho, U)).x
+                z_jobs = [delayed(minimize)(zbar_loss, Zbar_prev[:,j], jac=zbar_gradient,
+                                      args=(XWbar[:,j], Y[:,j], self.rho, U[:,j], self.num_proc))
+                          for j in range(Zbar_prev.shape[1])]
+                Zbar = [val.x for val in Parallel(n_jobs=self.num_proc)(z_jobs)]
+                Zbar = numpy.vstack(Zbar).T
                 Zbar = Zbar.reshape(nsamples, ntasks) / self.num_proc
-                
+
             # compute residuals and check for convergence
             dualresid = numpy.linalg.norm(-self.rho * (Zbar - Zbar_prev), 'fro')
             primalresid = numpy.linalg.norm(XWbar - Zbar, 'fro')
@@ -533,8 +538,9 @@ class WADMMMultiProcessor:
             if self.how == 'classify':
                 self.values = Theta.copy()
                 y_hat = self.predict(X)
-                print roc_auc_score((Y > 0.5).flatten(), y_hat.flatten())
-        
+                from sklearn.metrics import roc_auc_score
+                print roc_auc_score(Y.flatten(), y_hat.flatten())
+
             if (not self.quiet): #  and (self.curr_rank == self.root):
                 print "Iteration %i, PrimalResid: %2.2f, EPSPRI: %2.2f, DualResid: %2.2f"\
                 "EPSDUAL: %2.2f" % (k, primalresid, epspri,  dualresid, epsdual)

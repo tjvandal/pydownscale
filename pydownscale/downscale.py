@@ -204,7 +204,7 @@ class ASD(DownscaleModel):
         ytrue = self.to_xray(ytrue, t).rename({"value": "ground_truth"})
         if self.conditional is not None:
             yoccur = Parallel(n_jobs=self.num_proc)(yoccur_jobs)
-            yoccur = numpy.vstack(yoccur).T
+            yoccur = numpy.vstack(yoccur).T > 0.5
             yoccur = self.to_xray(yoccur, t).rename({"value": "occurance"})
             yhat['projected'] = yhat['projected']*yoccur['occurance']
             yhat = yhat.merge(yoccur)
@@ -248,11 +248,13 @@ class ASD(DownscaleModel):
 
 class ASDMultitask(DownscaleModel):
     def __init__(self, data, model, max_train_year=config.train_percent,
-                 season=None, feature_columns=None,
-                 ytransform=None, xtransform=None):
+                 season=None, feature_columns=None, conditional=None,
+                 ytransform=None, xtransform=None, cond_thres=None):
         DownscaleModel.__init__(self, data, model, max_train_year=max_train_year, season=season)
         self.xtransform = xtransform
         self.ytransform = ytransform
+        self.conditional = conditional
+        self.cond_thres = cond_thres
 
     def _split_dataset(self, X, y, test_set=False):
         year = self.data.observations['time.year']
@@ -272,13 +274,19 @@ class ASDMultitask(DownscaleModel):
         X = self.data.get_X()
         t = self.data.observations['time'].values
         Xtrain, ytrain = self._split_dataset(X, y, test_set=False) 
+        yclassify = (ytrain >= self.cond_thres).copy()
         if self.xtransform is not None:
             self.xtransform.fit(Xtrain)
             Xtrain = self.xtransform.transform(Xtrain)
         if self.ytransform is not None:
             self.ytransform.fit(ytrain)
             ytrain = self.ytransform.transform(ytrain)
-        self.model.fit(Xtrain, ytrain)
+        if self.conditional is not None:
+            self.conditional.fit(Xtrain, yclassify)
+            occur_rows = (ytrain >= self.cond_thres).mean(axis=1) >= 0.10
+        else:
+            occur_rows = [True] * ytrain.shape[0]
+        self.model.fit(Xtrain[occur_rows], ytrain[occur_rows])
 
     def predict(self, test_set=True):
         y, self.locations = self.data.get_y()
@@ -293,6 +301,12 @@ class ASDMultitask(DownscaleModel):
             yhat = self.ytransform.inverse_transform(yhat)
         yhat = self.to_xray(yhat, t).rename({"value": "projected"})
         ytrue = self.to_xray(y, t).rename({"value": "ground_truth"})
+        if self.conditional is not None:
+            yoccur = self.conditional.predict(X) > 0.5
+            yoccur = self.to_xray(yoccur, t).rename({"value": "occurance"})
+            yhat['projected'] = yhat['projected']*yoccur['occurance']
+            yhat = yhat.merge(yoccur)
+
         out = yhat.merge(ytrue)
         out['error'] = out.projected - out.ground_truth
         return out
