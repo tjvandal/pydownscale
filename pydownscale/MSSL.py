@@ -12,7 +12,7 @@ import utils
 from joblib import Parallel, delayed
 from sklearn import preprocessing
 from scipy.optimize import minimize
-EPSABS = 1e-2
+EPSABS = 1e-4
 EPSREL = 1e-4
 
 def hascomplex(x):
@@ -522,7 +522,9 @@ class WADMMMultiProcessor:
                 temp =  self.rho * (XWbar + U) + Y
                 Zbar = temp / (self.size + self.rho )
             elif self.how =='classify':
+                t0 = time.time() 
                 z_jobs = [delayed(minimize)(zbar_loss, Zbar_prev[:,j], jac=zbar_gradient,
+                                            method='Newton-CG',
                                       args=(XWbar[:,j], Y[:,j], self.rho, U[:,j], self.num_proc))
                           for j in range(Zbar_prev.shape[1])]
                 Zbar = [val.x for val in Parallel(n_jobs=self.num_proc)(z_jobs)]
@@ -539,8 +541,10 @@ class WADMMMultiProcessor:
                 self.values = Theta.copy()
                 y_hat = self.predict(X)
                 from sklearn.metrics import roc_auc_score
-                print roc_auc_score(Y.flatten(), y_hat.flatten())
-
+                print "Roc Score:", roc_auc_score(Y.flatten(), y_hat.flatten())
+                print "Yhat stats:", y_hat.mean(), y_hat.std()
+                print "Y stats:", Y.mean(), Y.std()
+                print "X stats:", X.mean(), X.std()
             if (not self.quiet): #  and (self.curr_rank == self.root):
                 print "Iteration %i, PrimalResid: %2.2f, EPSPRI: %2.2f, DualResid: %2.2f"\
                 "EPSDUAL: %2.2f" % (k, primalresid, epspri,  dualresid, epsdual)
