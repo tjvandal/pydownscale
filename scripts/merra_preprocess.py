@@ -20,12 +20,11 @@ raw_dir = os.path.join(base_dir, "6hour", "raw")
 remap_dir = os.path.join(base_dir, "6hour", "remap")
 surface_raw_dir = os.path.join(base_dir, "6hour", "M2I1NXASM.5.12.4")
 
-
-remap = "/home/vandal.t/repos/pydownscale/scripts/merra_remap_1.0x1.25"
 vars = ['T', 'U', 'V', 'H', 'QV', 'SLP', 'PS'] 
 surface_vars = ['T2M', 'TS', 'V2M', 'U2M', 'TQV', 'TQL'] 
 months = range(1,13)
 years = range(1980, 2016)
+upscalefactor = 2  ## CHANGE THIS UPSCALE FACTOR AS YOU WISH
 
 files = None
 if rank == 0:
@@ -140,7 +139,7 @@ for fpath, f in surface_files:
         tempfile = "temp" + f 
         argsvars = ['cdo', 'selname,%s' % ",".join(surface_vars), fpath, tempfile]
         subprocess.check_call(argsvars)
-        args = ['cdo', 'remapbil,%s' % remap, tempfile, remapfile]
+        args = ['cdo', 'gridboxmean,%i,%i' % (upscalefactor, upscalefactor), tempfile, remapfile]
         subprocess.check_call(args)
         os.remove(tempfile)
 
