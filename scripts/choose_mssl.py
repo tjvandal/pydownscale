@@ -19,13 +19,13 @@ def plot_3d(x, y, z, ax=None):
     surf = ax.plot_wireframe(x, y, z)
 
 
-mssldir = "/gss_gpfs_scratch/vandal.t/experiments/msslerr_nc/"
+mssldir = "/gss_gpfs_scratch/vandal.t/experiments/mssl_root_nc/"
 seasons = ['JJA', 'MAM', 'DJF', 'SON']
 train_year = 1999
 validate_year = 2004
 
 seas = seasons[0]
-for seas in seasons[:2]:
+for seas in seasons[:3]:
     seasonfiles = [(f, os.path.join(mssldir, f)) for f in os.listdir(mssldir) if seas in f]
     results = []
     for f, fpath in seasonfiles:

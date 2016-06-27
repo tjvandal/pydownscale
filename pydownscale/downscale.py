@@ -91,10 +91,14 @@ def worker_predict(model, X):
     return model.predict(X)
 
 def worker_predict_prob(model, X):
-    return model.predict_proba(X)[:,1]
+    if hasattr(model, 'predict_proba'):
+        return model.predict_proba(X)[:,1]
+    else:
+        return model.predict(X)
 
 def worker_invtrans(model, x):
     return model.inverse_transform(x)
+
 
 class ASD(DownscaleModel):
     def __init__(self, data, model=BackwardStepwiseRegression(),

@@ -525,11 +525,11 @@ class WADMMMultiProcessor:
                 t0 = time.time() 
                 z_jobs = [delayed(minimize)(zbar_loss, Zbar_prev[:,j], jac=zbar_gradient,
                                             method='Newton-CG',
-                                      args=(XWbar[:,j], Y[:,j], self.rho, U[:,j], self.num_proc))
+                                      args=(XWbar[:,j], Y[:,j], self.rho, U[:,j], 1))
                           for j in range(Zbar_prev.shape[1])]
                 Zbar = [val.x for val in Parallel(n_jobs=self.num_proc)(z_jobs)]
                 Zbar = numpy.vstack(Zbar).T
-                Zbar = Zbar.reshape(nsamples, ntasks) / self.num_proc
+                Zbar = Zbar.reshape(nsamples, ntasks) # / self.num_proc
 
             # compute residuals and check for convergence
             dualresid = numpy.linalg.norm(-self.rho * (Zbar - Zbar_prev), 'fro')
@@ -541,10 +541,7 @@ class WADMMMultiProcessor:
                 self.values = Theta.copy()
                 y_hat = self.predict(X)
                 from sklearn.metrics import roc_auc_score
-                print "Roc Score:", roc_auc_score(Y.flatten(), y_hat.flatten())
-                print "Yhat stats:", y_hat.mean(), y_hat.std()
-                print "Y stats:", Y.mean(), Y.std()
-                print "X stats:", X.mean(), X.std()
+                print "Roc Score:", roc_auc_score(Y.flatten(), y_hat.flatten()), "\tYhat stats:", y_hat.mean(), y_hat.std()
             if (not self.quiet): #  and (self.curr_rank == self.root):
                 print "Iteration %i, PrimalResid: %2.2f, EPSPRI: %2.2f, DualResid: %2.2f"\
                 "EPSDUAL: %2.2f" % (k, primalresid, epspri,  dualresid, epsdual)

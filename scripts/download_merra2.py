@@ -11,16 +11,15 @@ import tempfile
 import calendar
 
 preprocess = True 
-tempdir = tempfile.mkdtemp(prefix="/gss_gpfs_scratch/vandal.t/tmp/")
+#tempdir = tempfile.mkdtemp(prefix="/gss_gpfs_scratch/vandal.t/tmp/")
 tempdir = "/gss_gpfs_scratch/vandal.t/merra_2/lnd/raw/"
-baseurl = "http://goldsmr5.gesdisc.eosdis.nasa.gov/data/s4pa/MERRA2/M2I6NPANA.5.12.4"\
-        "/%(year)04d/%(month)02d/MERRA2_%(v)03d.inst6_3d_ana_Np." \
-        "%(year)04d%(month)02d%(day)02d.nc4"
+#baseurl = "http://goldsmr5.gesdisc.eosdis.nasa.gov/data/s4pa/MERRA2/M2I6NPANA.5.12.4"\
+#        "/%(year)04d/%(month)02d/MERRA2_%(v)03d.inst6_3d_ana_Np." \
+#        "%(year)04d%(month)02d%(day)02d.nc4"
 baseurl = "ftp://goldsmr4.sci.gsfc.nasa.gov/data/s4pa/MERRA2/M2T1NXLND.5.12.4/" \
         "%(year)04d/%(month)02d/MERRA2_%(v)03d.tavg1_2d_lnd_Nx.%(year)04d%(month)02d%(day)02d.nc4"
 
 #vars = ['PS', 'QV', 'SLP', 'T', 'U', 'V']
-vars = ['PRECTOTLAND',]
 remapspecs= "~/repos/pydownscale/scripts/merra_remap_1.0x1.25"
 
 for y in range(1980, 2016):
