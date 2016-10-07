@@ -3,16 +3,17 @@
 local testing command:
 mpirun -np 48 /shared/apps/sage/sage-5.12/spkg/bin/sage -python mpi_asd.py
 '''
-import sys
+import sys, os
 sys.path.insert(0, "/home/vandal.t/anaconda2/lib/python2.7/site-packages")
-sys.path.insert(0, "/home/vandal.t/repos/pydownscale")
+pydownscale_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, pydownscale_dir)
 
 from mpi4py import MPI
 import numpy
 from pydownscale.data import DownscaleData
 from pydownscale import config
 from pydownscale import utils
-import xray
+import xarray
 from pydownscale.utils import LogTransform, BoxcoxTransform
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LassoLarsCV,LinearRegression, LogisticRegression
@@ -27,9 +28,9 @@ from sklearn import svm
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
-
-size_per_job = 48
-
+print "Size: %i, Rank: %i" % (size, rank)
+size_per_job = 40
+sys.exit()
 groupworld = comm.Get_group()
 num_groups = max(int(size/size_per_job), 1)
 jobranks = [i for i in range(size)]

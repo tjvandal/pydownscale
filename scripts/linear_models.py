@@ -2,7 +2,7 @@ import sys
 import numpy
 from pydownscale.data import DownscaleData
 from pydownscale import config
-import xray
+import xarray
 from pydownscale.utils import LogTransform, BoxcoxTransform
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LassoLarsCV,LinearRegression

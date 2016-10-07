@@ -1,4 +1,4 @@
-import xray
+import xarray
 import numpy
 import os, sys
 from qmap import QMap 
@@ -92,10 +92,10 @@ class BCSDd():
 
             mapped_data[curr_day_rows, :, :] = day_mapped
 
-        dr = xray.DataArray(mapped_data, coords=[obs['time'].values, lat_vals, lon_vals], 
+        dr = xarray.DataArray(mapped_data, coords=[obs['time'].values, lat_vals, lon_vals], 
                        dims=['time', 'lat', 'lon'])
         dr.attrs['gridtype'] = 'latlon'
-        ds = xray.Dataset({'bias_corrected': dr}) 
+        ds = xarray.Dataset({'bias_corrected': dr}) 
         ds = ds.reindex_like(modeled)
         modeled = modeled.merge(ds)
         del modeled['PRECTOTLAND']
@@ -103,17 +103,17 @@ class BCSDd():
 
 def test_bcsd():
     obs_file = "/gss_gpfs_scratch/vandal.t/cpc/merged_prcp/cpc_1980_2014.nc"
-    modeled_file = "/gss_gpfs_scratch/vandal.t/merra_2/lnd/MERRA2_PRCP_D_1.0X1.25xray.nc4"
-    obs_data = xray.open_dataset(obs_file)
-    modeled_data = xray.open_dataset(modeled_file)
+    modeled_file = "/gss_gpfs_scratch/vandal.t/merra_2/lnd/MERRA2_PRCP_D_1.0X1.25xarray.nc4"
+    obs_data = xarray.open_dataset(obs_file)
+    modeled_data = xarray.open_dataset(modeled_file)
     modeled_data.load()
     obs_data.load()
     obs_data = obs_data.dropna('time', how='all')
 
     obs_data = obs_data.resample("D", "time")
-    obs_data.to_netcdf(obs_file.replace(".nc", "xray.nc"))
+    obs_data.to_netcdf(obs_file.replace(".nc", "xarray.nc"))
     #modeled_data = modeled_data.resample("D", "time")
-    #modeled_data.to_netcdf(modeled_file.replace(".nc", "xray.nc"))
+    #modeled_data.to_netcdf(modeled_file.replace(".nc", "xarray.nc"))
 
 
     bcsd = BCSDd()

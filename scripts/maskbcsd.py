@@ -1,11 +1,11 @@
-import xray
+import xarray
 import os
 
 maskfile = "/gss_gpfs_scratch/vandal.t/cpc/masks/newengland_mask_5m.nc"
-mask = xray.open_dataset(maskfile)
+mask = xarray.open_dataset(maskfile)
 
 asdfile = "../asd_nc/ELNET_D_DJF.nc"
-asd = xray.open_dataset(asdfile)
+asd = xarray.open_dataset(asdfile)
 lats = asd.lat
 lons = asd.lon
 
@@ -14,13 +14,13 @@ for f in bcsdfiles:
     print f
     season = f.split("_")[2]
     asdfile = "../asd_nc/ELNET_D_%s.nc" % season
-    asd = xray.open_dataset(asdfile)
+    asd = xarray.open_dataset(asdfile)
     times = asd.time
-    bcsd = xray.open_dataset(f)
+    bcsd = xarray.open_dataset(f)
     bcsdsub = bcsd.sel(lat=lats, lon=(lons-360), time=times)
-    drbcsd = xray.DataArray(bcsdsub.projection.values, coords=[times, lats, lons], dims=['lat', 'lon', 'time']) 
+    drbcsd = xarray.DataArray(bcsdsub.projection.values, coords=[times, lats, lons], dims=['lat', 'lon', 'time']) 
 
-    dsout = xray.Dataset({'ground_truth': (['lat', 'lon', 'time'], asd.ground_truth.values),
+    dsout = xarray.Dataset({'ground_truth': (['lat', 'lon', 'time'], asd.ground_truth.values),
                        'projected': (['time', 'lat', 'lon'], bcsdsub.projection.values)},
                       coords={'lat': lats, 'lon': lons, 'time': times}
                      )

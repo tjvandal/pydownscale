@@ -1,7 +1,7 @@
 import matplotlib
 matplotlib.use('Agg')
 
-import xray
+import xarray
 import numpy
 import os
 import pandas
@@ -30,7 +30,7 @@ for seas in seasons[:3]:
     results = []
     for f, fpath in seasonfiles:
         val = {}
-        data = xray.open_dataset(fpath)
+        data = xarray.open_dataset(fpath)
         data.load()
         n = data.time.shape[0]
         valrows = numpy.where((data['time.year'] > train_year) & (data['time.year'] <= validate_year))[0] 

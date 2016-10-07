@@ -85,7 +85,7 @@ if __name__ == "__main__":
 
     #files = get_ncep_file_paths()
     #print files
-    #import xray
-    #d = xray.open_mfdataset(files)
+    #import xarray
+    #d = xarray.open_mfdataset(files)
     #print d['rhum'].values
 

@@ -148,7 +148,6 @@ class pMSSL:
            yhat = self.ytransform.inverse_transform(yhat)
         return yhat
 
-
 class OmegaADMM:
     def __init__(self, gamma, lambd, rho, K, omega_epochs=100, quiet=True):
         self.gamma = gamma
@@ -199,7 +198,6 @@ class OmegaADMM:
                 print "OMEGA DID NOT CONVERGE"
 
         self.values = Z 
-
 
 class WFista:
     def __init__(self, gamma, lambd, shape, maxepochs=100, epscost=1e-4):
@@ -472,7 +470,6 @@ def sigmoid(x):
     x[x>20] = 20
     x[x<-20] = -20
     return 1. / ( 1 + numpy.exp(-x))
-
 
 class WADMMMultiProcessor:
     def __init__(self, lambd, gamma, shape, rho=1., 

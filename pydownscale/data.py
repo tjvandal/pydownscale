@@ -1,5 +1,5 @@
 
-import xray
+import xarray
 import os, time, sys
 import numpy
 import pandas
@@ -7,13 +7,13 @@ from scipy.misc import factorial
 import config
 
 '''
-Lets let reanalysis be a list of xray datasets where the time axis matches but may have different levels
+Lets let reanalysis be a list of xarray datasets where the time axis matches but may have different levels
 normalization is no needed at this step, atleast until training
 '''
 
 class DownscaleData:
     def __init__(self, reanalysis, observations):
-        if isinstance(reanalysis, xray.Dataset):
+        if isinstance(reanalysis, xarray.Dataset):
             reanalysis = [reanalysis]
 
         self.reanalysis = reanalysis
@@ -28,8 +28,8 @@ class DownscaleData:
 
     def _check_reanalysis(self):
 		for _, n in self.reanalysis.iteritems():
-			if (not isinstance(n, xray.Dataset)) and (not isinstance(n, xray.DataArray)):
-				raise TypeError("Reanalysis Data should be a list of xray datasets or dataarrays.")
+			if (not isinstance(n, xarray.Dataset)) and (not isinstance(n, xarray.DataArray)):
+				raise TypeError("Reanalysis Data should be a list of xarray datasets or dataarrays.")
 
 	# can we make this dynamic in the future?
     def _checkindices(self):
@@ -224,18 +224,18 @@ def read_nc_files(dir, bounds=None):
 
     files = get_reanalysis_file_paths(dir)
     if len(files) > 1:
-        data = xray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
+        data = xarray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
     elif len(files) == 1:
-        data = xray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
+        data = xarray.open_mfdataset(files, preprocess=lambda d: assert_bounds(d, bounds))
     else:
         raise IOError("There are no .nc files in that directory.")
     return data
 
 def assert_bounds(data, bounds=None):
     '''
-    :param data: Should be an xray dataset
+    :param data: Should be an xarray dataset
     :param bounds: dictionary of bounds {'lat': [l1 ,l2], 'lon': [l3, l4]}
-    :return: xray dataset bounded by the bounds
+    :return: xarray dataset bounded by the bounds
     '''
     def convert_lon(val):
         return (val + 360) % 360
@@ -259,8 +259,8 @@ def test_data():
     files1 = get_reanalysis_file_paths(p1)[2:3]
     files2 = get_reanalysis_file_paths(p2)[2:3]
 
-    d1 = xray.open_mfdataset(files1)
-    d2 = xray.open_mfdataset(files2)
+    d1 = xarray.open_mfdataset(files1)
+    d2 = xarray.open_mfdataset(files2)
     lowres = []
     for d in [d1, d2]:
         d.load()
@@ -295,7 +295,7 @@ def read_lowres_data(how='MS', which='reanalysis'):
         if len(fv) == 0:
             continue
 
-        d = xray.open_mfdataset(fv, preprocess=lambda d: assert_bounds(d, config.lowres_bounds))
+        d = xarray.open_mfdataset(fv, preprocess=lambda d: assert_bounds(d, config.lowres_bounds))
         d.load()
         levs = set(d.dims.keys()).intersection(set(('lev', 'plev', 'level')))
         if len(levs) >  1:

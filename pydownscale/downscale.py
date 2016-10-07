@@ -3,14 +3,14 @@ import numpy
 from scipy.stats import pearsonr, spearmanr, kendalltau
 import config
 import pandas
-import pickle 
+import pickle
 import time
 from stepwise_regression import BackwardStepwiseRegression
 from joblib import Parallel, delayed
 import copy
-import xray
+import xarray
 import utils
-from sklearn.preprocessing import StandardScaler 
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LassoCV
 
 class DownscaleModel:
@@ -98,7 +98,6 @@ def worker_predict_prob(model, X):
 
 def worker_invtrans(model, x):
     return model.inverse_transform(x)
-
 
 class ASD(DownscaleModel):
     def __init__(self, data, model=BackwardStepwiseRegression(),
@@ -204,12 +203,12 @@ class ASD(DownscaleModel):
 
         yhat = numpy.vstack(yhat).T
         ytrue = numpy.vstack(ytrue).T
-        yhat = self.to_xray(yhat, t).rename({"value": "projected"})
-        ytrue = self.to_xray(ytrue, t).rename({"value": "ground_truth"})
+        yhat = self.to_xarray(yhat, t).rename({"value": "projected"})
+        ytrue = self.to_xarray(ytrue, t).rename({"value": "ground_truth"})
         if self.conditional is not None:
             yoccur = Parallel(n_jobs=self.num_proc)(yoccur_jobs)
             yoccur = numpy.vstack(yoccur).T > 0.5
-            yoccur = self.to_xray(yoccur, t).rename({"value": "occurance"})
+            yoccur = self.to_xarray(yoccur, t).rename({"value": "occurance"})
             yhat['projected'] = yhat['projected']*yoccur['occurance']
             yhat = yhat.merge(yoccur)
 
@@ -217,7 +216,7 @@ class ASD(DownscaleModel):
         out['error'] = out.projected - out.ground_truth
         return out
 
-    def to_xray(self, y, times):
+    def to_xarray(self, y, times):
         data = []
         for i, row in self.locations.iterrows():
             for j, t in enumerate(times):
@@ -225,7 +224,7 @@ class ASD(DownscaleModel):
                              'time': t, self.data.obs_londim: row[self.data.obs_londim]})
         data = pandas.DataFrame(data)
         data.set_index([self.data.obs_latdim, self.data.obs_londim, "time"], inplace=True)
-        data = xray.Dataset.from_dataframe(data)
+        data = xarray.Dataset.from_dataframe(data)
         return data
 
     def project_gcm(self, gcm):
@@ -247,7 +246,7 @@ class ASD(DownscaleModel):
             if self.ytransform is not None:
                 yhat[j] = self.ytrans[j].inverse_transform(yhat[j])
         yhat = numpy.vstack(yhat).T
-        yhat = self.to_xray(yhat, t).rename(dict(value="projected_gcm"))
+        yhat = self.to_xarray(yhat, t).rename(dict(value="projected_gcm"))
         return yhat
 
 class ASDMultitask(DownscaleModel):
@@ -305,11 +304,11 @@ class ASDMultitask(DownscaleModel):
         yhat = self.model.predict(X)
         if self.ytransform is not None:
             yhat = self.ytransform.inverse_transform(yhat)
-        yhat = self.to_xray(yhat, t).rename({"value": "projected"})
-        ytrue = self.to_xray(y, t).rename({"value": "ground_truth"})
+        yhat = self.to_xarray(yhat, t).rename({"value": "projected"})
+        ytrue = self.to_xarray(y, t).rename({"value": "ground_truth"})
         if self.conditional is not None:
             yoccur = self.conditional.predict(X)
-            yoccur = self.to_xray(yoccur, t).rename({"value": "occurance"})
+            yoccur = self.to_xarray(yoccur, t).rename({"value": "occurance"})
             yhat['projected'] = yhat['projected']*(yoccur['occurance'] > 0.5)
             yhat = yhat.merge(yoccur)
 
@@ -317,7 +316,7 @@ class ASDMultitask(DownscaleModel):
         out['error'] = out.projected - out.ground_truth
         return out
 
-    def to_xray(self, y, times):
+    def to_xarray(self, y, times):
         data = []
         for i, row in self.locations.iterrows():
             for j, t in enumerate(times):
@@ -325,7 +324,7 @@ class ASDMultitask(DownscaleModel):
                              'time': t, self.data.obs_londim: row[self.data.obs_londim]})
         data = pandas.DataFrame(data)
         data.set_index([self.data.obs_latdim, self.data.obs_londim, "time"], inplace=True)
-        data = xray.Dataset.from_dataframe(data)
+        data = xarray.Dataset.from_dataframe(data)
         return data
 
     def project_gcm(self, gcm):
@@ -338,7 +337,7 @@ class ASDMultitask(DownscaleModel):
         yhat = self.model.predict(X)
         if self.ytransform is not None:
             yhat = self.ytransform.inverse_transform(yhat)
-        yhat = self.to_xray(yhat, t) 
+        yhat = self.to_xarray(yhat, t) 
         yhat = yhat.rename({"value": "projected_gcm"})
         return yhat
 
@@ -348,8 +347,11 @@ if __name__ == "__main__":
     from sklearn.decomposition import PCA
     f = "/gss_gpfs_scratch/vandal.t/experiments/DownscaleData/newengland_D_12781_8835.pkl"
     data = pickle.load(open(f, 'r'))
-    asd = ASD(data, model=LinearRegression(),xtransform=PCA(n_components=0.98), season='JJA',
-             conditional=LogisticRegression(), cond_thres=10., num_proc=40) 
+    #asd = ASD(data, model=LinearRegression(),xtransform=PCA(n_components=0.98), season='JJA',
+    #         conditional=LogisticRegression(), cond_thres=10., num_proc=40)
+    asd = ASD(data, model=LinearRegression(), xtransform=PCA(n_components=0.98), season='JJA',
+             conditional=None, num_proc=20)
+    print "Training"
     asd.train()
     print "predicting"
     yhat = asd.predict()
