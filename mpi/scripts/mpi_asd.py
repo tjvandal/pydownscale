@@ -23,14 +23,14 @@ import pickle
 from pydownscale.stepwise_regression import BackwardStepwiseRegression
 from pydownscale.bma import BMA
 from sklearn.decomposition import PCA
-from sklearn import svm 
+from sklearn import svm
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 print "Size: %i, Rank: %i" % (size, rank)
+
 size_per_job = 40
-sys.exit()
 groupworld = comm.Get_group()
 num_groups = max(int(size/size_per_job), 1)
 jobranks = [i for i in range(size)]
