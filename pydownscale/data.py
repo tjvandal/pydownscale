@@ -59,7 +59,7 @@ class DownscaleData:
         x = []
         for var in config.reanalysisvars:
             self.reanalysis[var].load()
-            df = self.reanalysis[var].to_array().to_dataframe()
+            df = self.reanalysis[var].to_dataframe()
             levels = sorted([v for v in df.index.names if v not in (timedim, 'bnds')])
             x.append(df.unstack(levels).values)
         x = numpy.column_stack(x)
@@ -102,7 +102,8 @@ class DownscaleData:
         if location is not None:
             y = self.observations.loc[location].to_array().values.squeeze()
         else:
-            y = self.observations.to_array().to_dataframe()
+            #y = self.observations.to_array().to_dataframe()
+            y = self.observations.to_dataframe()
             levels =sorted([var for var in y.index.names if var != timedim])
             y = y.unstack(levels)
             location = y.columns.to_series()
@@ -326,7 +327,7 @@ def read_obs(how='MS'):
     import config
     obs = read_nc_files(config.obs_dir, config.highres_bounds)
     obs.load()
-    obs.time = pandas.to_datetime(obs.time.values)
+    obs['time'] = pandas.to_datetime(obs.time.values)
     obs = obs.resample(how, dim='time', how=numpy.mean)
     return obs
 
