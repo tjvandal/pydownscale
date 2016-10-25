@@ -69,10 +69,6 @@ def main():
                 #             xtransform=PCA(n_components=0.98), ytransform=utils.RootTransform(0.25),
                 #                      num_proc=size_per_job, conditional=LogisticRegression("l2", C=10.),
                 #                      cond_thres=10.)],
-                 # ["PCASVRRoot", seas,  ASD(data, nearest_neighbor=False, model=svm.LinearSVR(),season=seas, 
-                 #            xtransform=PCA(n_components=0.98), ytransform=utils.RootTransform(0.25),
-                 #            num_proc=size_per_job, conditional=svm.SVC(kernel='linear'),
-                 #                           cond_thres=10.)],
                   ["PCASVRLogistic", seas,  ASD(data, nearest_neighbor=False, model=svm.LinearSVR(),season=seas, 
                              xtransform=PCA(n_components=0.98), ytransform=utils.RootTransform(0.25),
                              num_proc=size_per_job, conditional=LogisticRegression("l2", C=10.), cond_thres=10.)]
