@@ -1,13 +1,13 @@
-
 import xarray
 import os, time, sys
 import numpy
 import pandas
 from scipy.misc import factorial
-import config
+#import config
 
 '''
-Lets let reanalysis be a list of xarray datasets where the time axis matches but may have different levels
+Lets let reanalysis be a list of xarray datasets where the time axis 
+matches but may have different levels
 normalization is no needed at this step, atleast until training
 '''
 
@@ -213,9 +213,8 @@ def get_reanalysis_file_paths(basedir):
     files = []
     for (dirpath, dirnames, filenames) in os.walk(basedir):
         for f in filenames:
-            if '.nc' in f:
+            if ('.nc' in f):
                 files.append(os.path.join(dirpath, f))
-
     return sorted(files)
 
 def read_nc_files(dir, bounds=None):
@@ -290,9 +289,10 @@ def read_lowres_data(how='MS', which='reanalysis'):
         basedir = config.gcm_dir
         baselevels = config.gcmlevels
 
-    lowres = {} 
+    lowres = {}
     for v in vars:
         fv = get_reanalysis_file_paths(os.path.join(basedir, v))
+        fv= [fv[0], fv[-3]]
         if len(fv) == 0:
             continue
 

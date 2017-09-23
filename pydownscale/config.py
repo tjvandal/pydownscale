@@ -5,7 +5,7 @@ obs_dir = "/gss_gpfs_scratch/vandal.t/cpc/regions/"
 #obs_dir = "/gss_gpfs_scratch/vandal.t/gmfd/prcp/daily/0.25deg/"
 
 gcm_dir = "/gss_gpfs_scratch/vandal.t/cmip5/historical/atm/day/ccsm4/remap/"
-save_dir = "/gss_gpfs_scratch/vandal.t/experiments/"
+save_dir = "/gss_gpfs_scratch/vandal.t/sadm-experiments/"
 
 reanalysis_londim = 'lon'
 reanalysis_latdim = 'lat'
