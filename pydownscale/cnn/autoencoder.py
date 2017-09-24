@@ -23,43 +23,56 @@ from pydownscale.data import DownscaleData
 from pydownscale.utils import RootTransform
 from pydownscale import config
 
+config.save_dir = '/Users/tj/Downloads/'
+
+class ClimateData:
+    def __init__(self):
+        #data_dir = "/gss_gpfs_scratch/vandal.t/sadm-experiments/DownscaleData"
+        data_dir = "/Users/tj/Downloads/"
+        #data = pickle.load(open(os.path.join(data_dir, "newengland_D_12781_8835.pkl"), "r"))
+        data = pickle.load(open(os.path.join(data_dir, "newengland_D_731_8835.pkl"), "r"))
+
+        max_train_year = 2004
+        seas = "JJA"
+
+        seasonidxs = np.where(data.observations['time.season'] == seas)[0]
+        self.X = data.get_X()[seasonidxs]
+        self.Y, self.locs = data.get_y()
+        self.Y = self.Y[seasonidxs]
+
+        self.t = data.observations['time'][seasonidxs]
+
+        train_rows = np.where(self.t['time.year'] <= max_train_year)[0]
+        test_rows = np.where(self.t['time.year'] > max_train_year)[0]
+        ttest = self.t[test_rows]
+
+        self.Xtrain, self.Xtest = X[train_rows], X[test_rows]
+        self.YtrainTrue, self.YtestTrue = Y[train_rows], Y[test_rows]
+
+        self.Xmu, self.Xsd = Xtrain.mean(axis=0), Xtrain.std(axis=0)
+        Xtrain = (self.Xtrain - self.Xmu) / self.Xsd
+        Xtest = (self.Xtest - self.Xmu) / self.Xsd
+
+        self.scale_y = RootTransform(0.25)
+        self.scale_y.fit(YtrainTrue)
+        self.Ytrain = scale_y.transform(YtrainTrue)
+        self.Ytest = scale_y.transform(YtestTrue)
+
+    def get_data(self, train=True):
+        if train:
+            return self.Xtrain, self.Ytrain
+        else:
+            return self.Xtest, self.Ytest
 
 
-data_dir = "/gss_gpfs_scratch/vandal.t/sadm-experiments/DownscaleData"
-#data = pickle.load(open(os.path.join(data_dir, "newengland_D_12781_8835.pkl"), "r"))
-data = pickle.load(open(os.path.join(data_dir, "newengland_D_731_8835.pkl"), "r"))
 
-
-# In[124]:
-
-max_train_year = 2004
-seas = "JJA"
-
-seasonidxs = np.where(data.observations['time.season'] == seas)[0]
-#X = data.get_XTensor()[seasonidxs]
-X = data.get_X()[seasonidxs]
-Y, locs = data.get_y()
-Y = Y[seasonidxs]
-
-t = data.observations['time'][seasonidxs]
-
-train_rows = np.where(t['time.year'] <= max_train_year)[0]
-test_rows = np.where(t['time.year'] > max_train_year)[0]
-ttest = t[test_rows]
-
-Xtrain, Xtest = X[train_rows], X[test_rows]
-YtrainTrue, YtestTrue = Y[train_rows], Y[test_rows]
-
-Xmu, Xsd = Xtrain.mean(axis=0), Xtrain.std(axis=0)
-Xtrain = (Xtrain - Xmu) / Xsd
-Xtest = (Xtest - Xmu) / Xsd
-
-scale_y = RootTransform(0.25)
-scale_y.fit(YtrainTrue)
-Ytrain = scale_y.transform(YtrainTrue)
-Ytest = scale_y.transform(YtestTrue)
-
-print "Y shape:", Ytrain.shape, "X shape:", Xtrain.shape
+def test_data(n=1000, d=50):
+    X = np.random.normal(size=(n*2, d))
+    X[:,2:] /= 10.
+    y = 2 * X[:,0] - X[:,1]
+    Xtrain, ytrain = X[:n], y[:n]
+    Xtest, ytest = X[n:], y[n:]
+    return Xtrain, ytrain, Xtest, ytest
 
 def generate_batches(X, y, batch_size=20):
     iters = X.shape[0] / batch_size
@@ -105,33 +118,106 @@ class AutoEncoder(object):
         optimizer = tf.train.AdamOptimizer()
         self.opt = optimizer.minimize(self.loss)
 
+class BaseNetwork(object):
+    def __init__(self, x, init_kernels, init_biases):
+        self.x = x
+        self.init_kernels = init_kernels
+        self.init_biases = init_biases
+        self.encoded = self._build_graph()
 
-with tf.Graph().as_default(), tf.device("/cpu:0"):
-    # setup graph
-    x = tf.placeholder(tf.float32, shape=[None, X.shape[1]])
-    autoencode = AutoEncoder(x, hidden_layers=(500,10))
-    enc_variables = [var for var in tf.trainable_variables() if 'enc' in var.op.name]
-    saver = tf.train.Saver()
+    def _build_graph(self):
+        h = self.x
+        for j, (w_key, b_key) in enumerate(zip(sorted(self.init_kernels), sorted(self.init_biases))):
+            w = tf.constant_initializer(self.init_kernels[w_key])
+            b = tf.constant_initializer(self.init_biases[b_key])
+            h = tf.layers.dense(h, self.init_kernels[w_key].shape[1], kernel_initializer=w,
+                                bias_initializer=b, activation=tf.nn.relu)
+        return h
 
-    # start session
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        for epoch in range(21):
-            losses = []
-            for xbatch, ybatch in generate_batches(Xtrain, Ytrain):
-                res = sess.run([autoencode.opt, autoencode.loss], feed_dict={x: xbatch})
-                losses.append(res[1])
-            if epoch % 10 == 0:
-                print "Epoch: %i, Loss: %f" % (epoch, np.mean(losses))
-                saver.save(sess, os.path.join(config.save_dir, "autoencoder")) 
 
-        enc_kernels, enc_biases = dict(), dict()
-        for var in enc_variables:
-            if 'kernel' in var.op.name:
-                enc_kernels[var.op.name] = sess.run(var)
-            else:
-                enc_biases[var.op.name] = sess.run(var)
 
+class AEModel(BaseNetwork):
+    def __init__(self, x, y, init_kernels, init_biases, n_outputs=1, 
+                which='regression'):
+        BaseNetwork.__init__(self, x, init_kernels, init_biases)
+        self.n_outputs = n_outputs
+        self.y = y
+        self.which = which
+        self._extend_graph()
+
+    def _extend_graph(self):
+        if self.which == 'regression':
+            self.prediction = tf.layers.dense(self.encoded, self.n_outputs)
+            self.loss = tf.losses.mean_squared_error(self.y, self.prediction)
+        elif self.which == 'classify':
+            self.prediction = tf.layers.dense(self.encoded, self.n_outputs, activation=tf.sigmoid)
+            self.loss = tf.losses.sigmoid_cross_entropy(self.y, self.prediction)
+
+        self.opt = tf.train.AdamOptimizer().minimize(self.loss)
+
+def train_autoencoder(Xtrain, Ytrain, Xtest, Ytest):
+    with tf.Graph().as_default(), tf.device("/cpu:0"):
+        # setup graph
+        x = tf.placeholder(tf.float32, shape=[None, Xtrain.shape[1]])
+        autoencode = AutoEncoder(x, hidden_layers=(50,10))
+        enc_variables = [var for var in tf.trainable_variables() if 'enc' in var.op.name]
+        saver = tf.train.Saver()
+
+        # start session
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            for epoch in range(21):
+                losses = []
+                for xbatch, ybatch in generate_batches(Xtrain, Ytrain):
+                    res = sess.run([autoencode.opt, autoencode.loss], feed_dict={x: xbatch})
+                    losses.append(res[1])
+                if epoch % 10 == 0:
+                    print "Epoch: %i, Loss: %f" % (epoch, np.mean(losses))
+                    saver.save(sess, os.path.join(config.save_dir, "autoencoder"))
+
+            enc_kernels, enc_biases = dict(), dict()
+            for var in enc_variables:
+                if 'kernel' in var.op.name:
+                    enc_kernels[var.op.name] = sess.run(var)
+                else:
+                    enc_biases[var.op.name] = sess.run(var)
+    return enc_kernels, enc_biases
+
+def train_supervised(Xtrain, Ytrain, Xtest, Ytest, weights=None, biases=None, which='regression'):
+    if (weights is None) or (biases is None):
+        weights, biases = train_autoencoder(Xtrain, Ytrain, Xtest, Ytest)
+
+    with tf.Graph().as_default(), tf.device('cpu:0'):
+        x = tf.placeholder(tf.float32, shape=[None, Xtrain.shape[1]])
+        y = tf.placeholder(tf.float32, shape=[None, 1])
+        reg_model = AEModel(x, y, weights, biases, which=which)
+        # start session
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            for epoch in range(101):
+                losses = []
+                for xbatch, ybatch in generate_batches(Xtrain, Ytrain):
+                    res = sess.run([reg_model.opt, reg_model.loss], feed_dict={x: xbatch, y:
+                                                                               ybatch[:,np.newaxis]})
+                    losses.append(res[1])
+                if epoch % 10 == 0:
+                    print "Epoch: %i, Loss: %f" % (epoch, np.mean(losses))
+                    #saver.save(sess, os.path.join(config.save_dir, "")) 
+            test_predictions = sess.run(reg_model.prediction, feed_dict={x: Xtest})
+            plt.scatter(Ytest, test_predictions[:,0])
+            plt.savefig("test_regression.pdf")
+
+
+Xtrain, Ytrain, Xtest, Ytest = test_data()
+precip_days = Ytrain > 1.
+test_precip_days = Ytest > 1.
+
+enc_weights, enc_biases = train_autoencoder(Xtrain, Ytrain, Xtest, Ytest)
+train_supervised(Xtrain, precip_days, Xtest, test_precip_days, which='classify',
+                weights=enc_weights, biases=enc_biases)
+train_supervised(Xtrain[precip_days], Ytrain[precip_days], Xtest[test_precip_days],
+                 test_precip_days[test_precip_days], which='regression',
+                weights=enc_weights, biases=enc_biases)
 
 # Train Classification
 sys.exit()
